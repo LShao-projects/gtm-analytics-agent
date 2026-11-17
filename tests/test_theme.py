@@ -1,6 +1,7 @@
 from dashboard.theme import (
     BACKGROUND,
     CHART_PALETTE,
+    COMPARISON,
     INK,
     MUTED,
     NAVY,
@@ -30,3 +31,8 @@ def test_theme_text_contrast_meets_wcag_aa():
 def test_generic_chart_palette_does_not_use_status_colors():
     assert POSITIVE not in CHART_PALETTE
     assert NEGATIVE not in CHART_PALETTE
+
+
+def test_comparison_color_is_lighter_than_current_and_not_a_status_color():
+    assert _relative_luminance(COMPARISON) > _relative_luminance(NAVY)
+    assert COMPARISON not in {POSITIVE, NEGATIVE, MUTED}

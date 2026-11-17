@@ -1,3 +1,5 @@
+import sqlite3
+
 from dashboard.models import DatePeriod, FilterSpec
 from dashboard.options import (
     acquisition_filter_options,
@@ -32,7 +34,7 @@ def test_page_options_follow_period_and_global_filters(analytics_db):
     )
 
 
-def test_product_options_only_include_items_sold_in_period(analytics_db):
+def test_product_options_include_items_sold_or_refunded_in_period(analytics_db):
     april = product_filter_options(analytics_db, APRIL, FilterSpec())
     may = product_filter_options(analytics_db, MAY, FilterSpec())
 
@@ -45,4 +47,22 @@ def test_product_options_only_include_items_sold_in_period(analytics_db):
         "product": ("Original Fuzzy", "Love Bear"),
         "item_role": ("Primary", "Add-on"),
         "order_size": ("Single-item", "Multi-item"),
+    }
+
+
+def test_refund_only_product_remains_available_without_a_comparison_period(
+    analytics_db,
+):
+    with sqlite3.connect(analytics_db) as connection:
+        connection.execute(
+            "INSERT INTO order_item_refunds VALUES (2, '2014-06-15 12:00:00', 3, 2, 30)"
+        )
+    june = DatePeriod.from_months("2014-06", "2014-06")
+
+    options = product_filter_options(analytics_db, june, FilterSpec())
+
+    assert options == {
+        "product": ("Original Fuzzy",),
+        "item_role": ("Primary",),
+        "order_size": ("Single-item",),
     }

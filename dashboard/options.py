@@ -148,17 +148,39 @@ def product_filter_options(
     frame = query_df(
         path,
         f"""
-        SELECT DISTINCT p.product_id, p.product_name AS product,
-               CASE WHEN oi.is_primary_item = 1 THEN 'Primary' ELSE 'Add-on' END AS item_role,
-               CASE WHEN o.items_purchased = 1 THEN 'Single-item' ELSE 'Multi-item' END AS order_size
-        FROM order_items oi
-        JOIN orders o ON o.order_id = oi.order_id
-        JOIN website_sessions s ON s.website_session_id = o.website_session_id
-        JOIN products p ON p.product_id = oi.product_id
-        WHERE oi.created_at >= ? AND oi.created_at < ? AND {where}
-        ORDER BY p.product_id
+        SELECT DISTINCT product_id, product, item_role, order_size
+        FROM (
+            SELECT p.product_id, p.product_name AS product,
+                   CASE WHEN oi.is_primary_item = 1 THEN 'Primary' ELSE 'Add-on' END AS item_role,
+                   CASE WHEN o.items_purchased = 1 THEN 'Single-item' ELSE 'Multi-item' END AS order_size
+            FROM order_items oi
+            JOIN orders o ON o.order_id = oi.order_id
+            JOIN website_sessions s ON s.website_session_id = o.website_session_id
+            JOIN products p ON p.product_id = oi.product_id
+            WHERE oi.created_at >= ? AND oi.created_at < ? AND {where}
+
+            UNION
+
+            SELECT p.product_id, p.product_name AS product,
+                   CASE WHEN oi.is_primary_item = 1 THEN 'Primary' ELSE 'Add-on' END AS item_role,
+                   CASE WHEN o.items_purchased = 1 THEN 'Single-item' ELSE 'Multi-item' END AS order_size
+            FROM order_item_refunds r
+            JOIN order_items oi ON oi.order_item_id = r.order_item_id
+            JOIN orders o ON o.order_id = oi.order_id
+            JOIN website_sessions s ON s.website_session_id = o.website_session_id
+            JOIN products p ON p.product_id = oi.product_id
+            WHERE r.created_at >= ? AND r.created_at < ? AND {where}
+        )
+        ORDER BY product_id
         """,
-        [start, end, *dimension_params],
+        [
+            start,
+            end,
+            *dimension_params,
+            start,
+            end,
+            *dimension_params,
+        ],
     )
     return {
         "product": tuple(frame["product"].dropna().astype(str).drop_duplicates()),

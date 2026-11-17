@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from itertools import permutations
 from pathlib import Path
-from typing import Iterable
 
 import pandas as pd
 
@@ -20,6 +20,8 @@ PRODUCT_URLS = (
     "/the-birthday-sugar-panda",
     "/the-hudson-river-mini-bear",
 )
+PRODUCT_ROLE_VALUES = {"Primary": 1, "Add-on": 0}
+VALID_ORDER_SIZES = {"Single-item", "Multi-item"}
 
 
 def _filtered_sessions_cte(filters: FilterSpec, period: DatePeriod) -> tuple[str, list[object]]:
@@ -53,6 +55,8 @@ def overview_kpis(
     *,
     revenue_basis: str = "Gross",
 ) -> dict[str, float | int]:
+    if revenue_basis not in {"Gross", "Net"}:
+        raise ValueError(f"Unsupported revenue basis: {revenue_basis}")
     sessions_cte, session_params = _filtered_sessions_cte(filters, period)
     sessions = int(
         query_df(path, f"WITH {sessions_cte} SELECT COUNT(*) AS value FROM filtered_sessions", session_params)
@@ -105,18 +109,19 @@ def overview_kpis(
     refunded_items = int(refunds["refunded_items"] or 0)
     net_revenue = gross_revenue - refund_amount
     revenue = net_revenue if revenue_basis == "Net" else gross_revenue
-    margin = gross_revenue - cogs - (refund_amount if revenue_basis == "Net" else 0)
+    gross_margin = gross_revenue - cogs
     return {
         "revenue": revenue,
         "gross_revenue": gross_revenue,
         "net_revenue": net_revenue,
         "orders": orders,
         "sessions": sessions,
-        "conversion_rate": orders / sessions if sessions else 0.0,
-        "aov": gross_revenue / orders if orders else 0.0,
-        "gross_margin": margin,
+        "conversion_rate": orders / sessions if sessions else pd.NA,
+        "aov": gross_revenue / orders if orders else pd.NA,
+        "gross_margin": gross_margin,
+        "margin_after_recorded_refunds": gross_margin - refund_amount,
         "refund_amount": refund_amount,
-        "refund_rate": refunded_items / sold_items if sold_items else 0.0,
+        "refund_rate": refunded_items / sold_items if sold_items else pd.NA,
     }
 
 
@@ -151,6 +156,8 @@ def overview_trend(
     grain: str = "Month",
     revenue_basis: str = "Gross",
 ) -> pd.DataFrame:
+    if revenue_basis not in {"Gross", "Net"}:
+        raise ValueError(f"Unsupported revenue basis: {revenue_basis}")
     sessions_cte, session_params = _filtered_sessions_cte(filters, period)
     session_bucket = _grain_expression("s.created_at", grain)
     sessions = query_df(
@@ -216,22 +223,167 @@ def overview_trend(
     frame[numeric] = frame[numeric].fillna(0).apply(pd.to_numeric)
     frame["net_revenue"] = frame["gross_revenue"] - frame["refund_amount"]
     frame["revenue"] = frame["net_revenue"] if revenue_basis == "Net" else frame["gross_revenue"]
-    frame["conversion_rate"] = frame["orders"].div(frame["sessions"].replace(0, pd.NA)).fillna(0)
-    frame["aov"] = frame["gross_revenue"].div(frame["orders"].replace(0, pd.NA)).fillna(0)
-    frame["refund_rate"] = frame["refunded_items"].div(frame["sold_items"].replace(0, pd.NA)).fillna(0)
+    frame["conversion_rate"] = frame["orders"].div(
+        frame["sessions"].replace(0, pd.NA)
+    )
+    frame["aov"] = frame["gross_revenue"].div(frame["orders"].replace(0, pd.NA))
+    frame["refund_rate"] = frame["refunded_items"].div(
+        frame["sold_items"].replace(0, pd.NA)
+    )
     frame["gross_margin"] = frame["gross_revenue"] - frame["cogs"]
-    if revenue_basis == "Net":
-        frame["gross_margin"] -= frame["refund_amount"]
+    frame["margin_after_recorded_refunds"] = frame["gross_margin"] - frame["refund_amount"]
     return frame
 
 
-DIMENSION_EXPRESSIONS = {
-    "Traffic source": "s.traffic_source",
-    "Campaign": "s.campaign",
-    "Ad content": "s.ad_content",
+def revenue_driver_contributions(
+    current: dict[str, float | int],
+    prior: dict[str, float | int] | None,
+    *,
+    revenue_basis: str = "Gross",
+) -> pd.DataFrame:
+    """Return an order-independent accounting decomposition of revenue change.
+
+    The three gross-revenue terms use the Shapley value across every ordering of
+    sessions, order rate, and gross AOV. If event-period orders exist without
+    event-period sessions, an explicit timing residual preserves reconciliation.
+    Net revenue adds the signed impact of recorded refunds. These are accounting
+    contributions, not causal effects.
+    """
+
+    columns = ["driver", "contribution"]
+    if revenue_basis not in {"Gross", "Net"}:
+        raise ValueError(f"Unsupported revenue basis: {revenue_basis}")
+    if prior is None:
+        return pd.DataFrame(
+            {
+                "driver": pd.Series(dtype="object"),
+                "contribution": pd.Series(dtype="float64"),
+            }
+        )
+
+    factor_keys = ("sessions", "conversion_rate", "aov")
+    labels = {
+        "sessions": "Sessions",
+        "conversion_rate": "Order rate",
+        "aov": "Gross AOV",
+    }
+    current_values = {key: _number(current.get(key, 0)) for key in factor_keys}
+    prior_values = {key: _number(prior.get(key, 0)) for key in factor_keys}
+    contributions = {key: 0.0 for key in factor_keys}
+
+    def gross_revenue(values: dict[str, float]) -> float:
+        return values["sessions"] * values["conversion_rate"] * values["aov"]
+
+    orderings = tuple(permutations(factor_keys))
+    for ordering in orderings:
+        state = dict(prior_values)
+        for factor in ordering:
+            before = gross_revenue(state)
+            state[factor] = current_values[factor]
+            contributions[factor] += gross_revenue(state) - before
+
+    rows = [
+        {
+            "driver": labels[factor],
+            "contribution": contributions[factor] / len(orderings),
+        }
+        for factor in factor_keys
+    ]
+    factor_total = sum(row["contribution"] for row in rows)
+    current_gross = _number(
+        current.get("gross_revenue"), gross_revenue(current_values)
+    )
+    prior_gross = _number(
+        prior.get("gross_revenue"), gross_revenue(prior_values)
+    )
+    timing_residual = (current_gross - prior_gross) - factor_total
+    if abs(timing_residual) >= 0.005:
+        rows.append(
+            {
+                "driver": "Order/session timing residual",
+                "contribution": timing_residual,
+            }
+        )
+    if revenue_basis == "Net":
+        current_refunds = _number(current.get("refund_amount", 0))
+        prior_refunds = _number(prior.get("refund_amount", 0))
+        rows.append(
+            {
+                "driver": "Recorded refunds",
+                "contribution": -(current_refunds - prior_refunds),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def segment_contributions(
+    current: pd.DataFrame,
+    prior: pd.DataFrame | None,
+    *,
+    value_column: str = "revenue",
+    segment_column: str = "segment",
+) -> pd.DataFrame:
+    """Outer-join segment values and calculate additive change contributions."""
+
+    result_columns = [
+        segment_column,
+        "current",
+        "comparison",
+        "absolute_delta",
+        "share_of_total_delta",
+    ]
+    if prior is None:
+        return pd.DataFrame(
+            {
+                segment_column: pd.Series(dtype="object"),
+                "current": pd.Series(dtype="float64"),
+                "comparison": pd.Series(dtype="float64"),
+                "absolute_delta": pd.Series(dtype="float64"),
+                "share_of_total_delta": pd.Series(dtype="float64"),
+            }
+        )
+    for name, frame in (("current", current), ("comparison", prior)):
+        missing = {segment_column, value_column} - set(frame.columns)
+        if missing:
+            raise ValueError(f"{name} segment frame is missing: {', '.join(sorted(missing))}")
+
+    current_values = (
+        current.groupby(segment_column, dropna=False)[value_column]
+        .sum()
+        .rename("current")
+    )
+    prior_values = (
+        prior.groupby(segment_column, dropna=False)[value_column]
+        .sum()
+        .rename("comparison")
+    )
+    result = pd.concat([current_values, prior_values], axis=1).fillna(0).reset_index()
+    result["absolute_delta"] = result["current"] - result["comparison"]
+    total_delta = float(result["absolute_delta"].sum())
+    if abs(total_delta) >= 0.005:
+        result["share_of_total_delta"] = result["absolute_delta"] / total_delta
+    else:
+        result["share_of_total_delta"] = pd.Series(pd.NA, index=result.index, dtype="Float64")
+    result["_sort"] = result["absolute_delta"].abs()
+    return (
+        result.sort_values(["_sort", segment_column], ascending=[False, True])
+        .drop(columns="_sort")
+        .reset_index(drop=True)[result_columns]
+    )
+
+
+SESSION_DIMENSION_EXPRESSIONS = {
+    "Traffic source": TRAFFIC_SOURCE_SQL.format(alias="s"),
+    "UTM source": "COALESCE(NULLIF(s.utm_source, 'NULL'), 'Untracked')",
+    "Campaign": "COALESCE(NULLIF(s.utm_campaign, 'NULL'), 'Untracked')",
     "Device": "s.device_type",
-    "Session type": "s.session_type",
-    "Referrer type": "s.referrer_type",
+    "Session type": "CASE WHEN s.is_repeat_session = 1 THEN 'Repeat' ELSE 'New' END",
+    "Referrer type": REFERRER_TYPE_SQL.format(alias="s"),
+}
+
+DIMENSION_EXPRESSIONS = {
+    **SESSION_DIMENSION_EXPRESSIONS,
+    "Ad content": "COALESCE(NULLIF(s.utm_content, 'NULL'), 'Untracked')",
     "Landing page": "COALESCE(fp.pageview_url, 'No pageview')",
 }
 
@@ -246,19 +398,16 @@ def acquisition_performance(
 ) -> pd.DataFrame:
     if dimension not in DIMENSION_EXPRESSIONS:
         raise ValueError(f"Unsupported acquisition dimension: {dimension}")
-    sessions_cte, params = _filtered_sessions_cte(filters, period)
     landing_clause = ""
+    landing_params: list[object] = []
     if landing_pages is not None:
         if not landing_pages:
-            landing_clause = "WHERE 1 = 0"
+            landing_clause = "AND 1 = 0"
         else:
-            landing_clause = f"WHERE fp.pageview_url IN ({','.join('?' for _ in landing_pages)})"
-            params.extend(landing_pages)
+            landing_clause = f"AND fp.pageview_url IN ({','.join('?' for _ in landing_pages)})"
+            landing_params.extend(landing_pages)
     segment = DIMENSION_EXPRESSIONS[dimension]
-    frame = query_df(
-        path,
-        f"""
-        WITH {sessions_cte},
+    first_page_cte = """
         first_page AS (
             SELECT p.website_session_id, p.pageview_url
             FROM website_pageviews p
@@ -267,25 +416,49 @@ def acquisition_performance(
                 FROM website_pageviews GROUP BY website_session_id
             ) x ON x.first_id = p.website_pageview_id
         )
+    """
+    session_where, session_params = build_session_predicate(filters, period, alias="s")
+    sessions = query_df(
+        path,
+        f"""
+        WITH {first_page_cte}
         SELECT {segment} AS segment,
-               COUNT(s.website_session_id) AS sessions,
+               COUNT(s.website_session_id) AS sessions
+        FROM website_sessions s
+        LEFT JOIN first_page fp ON fp.website_session_id = s.website_session_id
+        WHERE {session_where} {landing_clause}
+        GROUP BY 1
+        """,
+        [*session_params, *landing_params],
+    )
+    dimension_where, dimension_params = _dimension_where(filters, period, alias="s")
+    start, end = period.sql_bounds()
+    orders = query_df(
+        path,
+        f"""
+        WITH {first_page_cte}
+        SELECT {segment} AS segment,
                COUNT(o.order_id) AS orders,
                COALESCE(SUM(o.price_usd), 0) AS revenue,
                COALESCE(SUM(o.price_usd - o.cogs_usd), 0) AS gross_margin
-        FROM filtered_sessions s
+        FROM orders o
+        JOIN website_sessions s ON s.website_session_id = o.website_session_id
         LEFT JOIN first_page fp ON fp.website_session_id = s.website_session_id
-        LEFT JOIN orders o ON o.website_session_id = s.website_session_id
-        {landing_clause}
-        GROUP BY 1 ORDER BY revenue DESC, sessions DESC
+        WHERE o.created_at >= ? AND o.created_at < ? AND {dimension_where} {landing_clause}
+        GROUP BY 1
         """,
-        params,
+        [start, end, *dimension_params, *landing_params],
     )
+    frame = sessions.merge(orders, on="segment", how="outer")
     if frame.empty:
         return frame.assign(conversion_rate=pd.Series(dtype=float), revenue_per_session=pd.Series(dtype=float), margin_per_session=pd.Series(dtype=float))
-    frame["conversion_rate"] = frame["orders"] / frame["sessions"]
-    frame["revenue_per_session"] = frame["revenue"] / frame["sessions"]
-    frame["margin_per_session"] = frame["gross_margin"] / frame["sessions"]
-    return frame
+    numeric = ["sessions", "orders", "revenue", "gross_margin"]
+    frame[numeric] = frame[numeric].fillna(0).apply(pd.to_numeric)
+    denominator = frame["sessions"].replace(0, pd.NA)
+    frame["conversion_rate"] = frame["orders"].div(denominator)
+    frame["revenue_per_session"] = frame["revenue"].div(denominator)
+    frame["margin_per_session"] = frame["gross_margin"].div(denominator)
+    return frame.sort_values(["revenue", "sessions"], ascending=False).reset_index(drop=True)
 
 
 def overview_drivers(
@@ -294,17 +467,13 @@ def overview_drivers(
     period: DatePeriod,
     *,
     dimension: str = "Traffic source",
+    revenue_basis: str = "Gross",
 ) -> pd.DataFrame:
-    expressions = {
-        "Traffic source": TRAFFIC_SOURCE_SQL.format(alias="s"),
-        "Campaign": "COALESCE(NULLIF(s.utm_campaign, 'NULL'), 'Untracked')",
-        "Device": "s.device_type",
-        "Session type": "CASE WHEN s.is_repeat_session = 1 THEN 'Repeat' ELSE 'New' END",
-        "Referrer type": REFERRER_TYPE_SQL.format(alias="s"),
-    }
-    if dimension not in expressions:
+    if revenue_basis not in {"Gross", "Net"}:
+        raise ValueError(f"Unsupported revenue basis: {revenue_basis}")
+    if dimension not in SESSION_DIMENSION_EXPRESSIONS:
         raise ValueError(f"Unsupported overview driver dimension: {dimension}")
-    expression = expressions[dimension]
+    expression = SESSION_DIMENSION_EXPRESSIONS[dimension]
     session_where, session_params = build_session_predicate(filters, period, alias="s")
     sessions = query_df(
         path,
@@ -323,7 +492,7 @@ def overview_drivers(
         f"""
         SELECT {expression} AS segment,
                COUNT(o.order_id) AS orders,
-               COALESCE(SUM(o.price_usd), 0) AS revenue,
+               COALESCE(SUM(o.price_usd), 0) AS gross_revenue,
                COALESCE(SUM(o.price_usd - o.cogs_usd), 0) AS gross_margin
         FROM orders o
         JOIN website_sessions s ON s.website_session_id = o.website_session_id
@@ -332,12 +501,35 @@ def overview_drivers(
         """,
         [start, end, *dimension_params],
     )
-    frame = sessions.merge(orders, on="segment", how="outer").fillna(0)
+    refunds = query_df(
+        path,
+        f"""
+        SELECT {expression} AS segment,
+               COALESCE(SUM(r.refund_amount_usd), 0) AS refund_amount
+        FROM order_item_refunds r
+        JOIN order_items oi ON oi.order_item_id = r.order_item_id
+        JOIN orders o ON o.order_id = oi.order_id
+        JOIN website_sessions s ON s.website_session_id = o.website_session_id
+        WHERE r.created_at >= ? AND r.created_at < ? AND {dimension_where}
+        GROUP BY 1
+        """,
+        [start, end, *dimension_params],
+    )
+    frame = sessions.merge(orders, on="segment", how="outer").merge(refunds, on="segment", how="outer").fillna(0)
     if frame.empty:
-        return frame.assign(conversion_rate=pd.Series(dtype=float), revenue_per_session=pd.Series(dtype=float), margin_per_session=pd.Series(dtype=float))
-    frame["conversion_rate"] = frame["orders"].div(frame["sessions"].replace(0, pd.NA)).fillna(0)
-    frame["revenue_per_session"] = frame["revenue"].div(frame["sessions"].replace(0, pd.NA)).fillna(0)
-    frame["margin_per_session"] = frame["gross_margin"].div(frame["sessions"].replace(0, pd.NA)).fillna(0)
+        return frame.assign(
+            net_revenue=pd.Series(dtype=float),
+            revenue=pd.Series(dtype=float),
+            conversion_rate=pd.Series(dtype=float),
+            revenue_per_session=pd.Series(dtype=float),
+            margin_per_session=pd.Series(dtype=float),
+        )
+    frame["net_revenue"] = frame["gross_revenue"] - frame["refund_amount"]
+    frame["revenue"] = frame["net_revenue"] if revenue_basis == "Net" else frame["gross_revenue"]
+    denominator = frame["sessions"].replace(0, pd.NA)
+    frame["conversion_rate"] = frame["orders"].div(denominator)
+    frame["revenue_per_session"] = frame["revenue"].div(denominator)
+    frame["margin_per_session"] = frame["gross_margin"].div(denominator)
     return frame.sort_values(["revenue", "sessions"], ascending=False).reset_index(drop=True)
 
 
@@ -364,8 +556,8 @@ def _funnel_ctes(
     params.extend(selected_products)
     billing_urls = {
         "All": ("/billing", "/billing-2"),
-        "Original": ("/billing",),
-        "Optimized": ("/billing-2",),
+        "/billing": ("/billing",),
+        "/billing-2": ("/billing-2",),
     }.get(funnel_version)
     if billing_urls is None:
         raise ValueError(f"Unsupported funnel version: {funnel_version}")
@@ -424,8 +616,8 @@ def _funnel_cohort_filter(
             params.extend(landing_pages)
         else:
             clauses.append("1 = 0")
-    if product_pages is not None and set(product_pages) != set(PRODUCT_URLS):
-        clauses.append("product_id IS NOT NULL")
+    if product_pages is not None and not product_pages:
+        clauses.append("1 = 0")
     return " AND ".join(clauses)
 
 
@@ -467,17 +659,20 @@ def funnel_summary(
     rows = []
     total = stages[0][1]
     previous = total
+    previous_name: str | None = None
     for name, count in stages:
         rows.append(
             {
                 "stage": name,
+                "transition": None if previous_name is None else f"{previous_name} → {name}",
                 "sessions": count,
-                "step_conversion": count / previous if previous else 0.0,
-                "total_conversion": count / total if total else 0.0,
+                "step_conversion": count / previous if previous else pd.NA,
+                "total_conversion": count / total if total else pd.NA,
                 "drop_off": max(previous - count, 0),
             }
         )
         previous = count
+        previous_name = name
     return pd.DataFrame(rows)
 
 
@@ -518,8 +713,22 @@ def funnel_breakdown(
     )
     if frame.empty:
         return frame.assign(conversion_rate=pd.Series(dtype=float))
-    frame["conversion_rate"] = frame["orders"] / frame["sessions"]
+    frame["conversion_rate"] = frame["orders"].div(frame["sessions"].replace(0, pd.NA))
     return frame
+
+
+def _validate_product_filter_values(
+    item_roles: tuple[str, ...],
+    order_sizes: tuple[str, ...],
+) -> None:
+    unknown_roles = sorted(set(item_roles) - set(PRODUCT_ROLE_VALUES))
+    if unknown_roles:
+        raise ValueError("Unsupported item roles: " + ", ".join(unknown_roles))
+    unknown_order_sizes = sorted(set(order_sizes) - VALID_ORDER_SIZES)
+    if unknown_order_sizes:
+        raise ValueError(
+            "Unsupported order sizes: " + ", ".join(unknown_order_sizes)
+        )
 
 
 def _product_filter_sql(
@@ -528,12 +737,14 @@ def _product_filter_sql(
     order_sizes: tuple[str, ...],
     params: list[object],
 ) -> str:
+    _validate_product_filter_values(item_roles, order_sizes)
+
     clauses: list[str] = []
     if not products or not item_roles or not order_sizes:
         return "1 = 0"
     clauses.append(f"p.product_name IN ({','.join('?' for _ in products)})")
     params.extend(products)
-    roles = tuple(1 if value == "Primary" else 0 for value in item_roles)
+    roles = tuple(PRODUCT_ROLE_VALUES[value] for value in item_roles)
     clauses.append(f"oi.is_primary_item IN ({','.join('?' for _ in roles)})")
     params.extend(roles)
     size_expressions = []
@@ -557,7 +768,7 @@ def product_performance(
 ) -> pd.DataFrame:
     result_columns = [
         "product", "units", "revenue", "cogs", "addon_units", "units_refunded",
-        "refunded_amount", "gross_margin", "net_revenue", "refund_rate", "attachment_rate",
+        "refunded_amount", "gross_margin", "net_revenue", "refund_rate", "addon_unit_share",
     ]
     if not products or not item_roles or not order_sizes:
         return pd.DataFrame({column: pd.Series(dtype="object" if column == "product" else "float64") for column in result_columns})
@@ -596,7 +807,7 @@ def product_performance(
         refund_sql = f"""
             WITH {dimension_sessions_cte}
             SELECT p.product_name AS product,
-                   COUNT(r.order_item_refund_id) AS units_refunded,
+                   COUNT(DISTINCT r.order_item_id) AS units_refunded,
                    COALESCE(SUM(r.refund_amount_usd), 0) AS refunded_amount
             FROM dimension_sessions s
             JOIN orders o ON o.website_session_id = s.website_session_id
@@ -634,8 +845,12 @@ def product_performance(
     result[["units", "addon_units", "units_refunded"]] = result[["units", "addon_units", "units_refunded"]].astype(int)
     result["gross_margin"] = result["revenue"] - result["cogs"]
     result["net_revenue"] = result["revenue"] - result["refunded_amount"]
-    result["refund_rate"] = result["units_refunded"].div(result["units"].replace(0, pd.NA)).fillna(0)
-    result["attachment_rate"] = result["addon_units"].div(result["units"].replace(0, pd.NA)).fillna(0)
+    result["refund_rate"] = result["units_refunded"].div(
+        result["units"].replace(0, pd.NA)
+    )
+    result["addon_unit_share"] = result["addon_units"].div(
+        result["units"].replace(0, pd.NA)
+    )
     return result
 
 
@@ -673,11 +888,15 @@ def aggregate_product_trend(frame: pd.DataFrame, metric: str) -> pd.DataFrame:
         return pd.DataFrame(columns=["period", metric])
     if metric == "refund_rate":
         grouped = frame.groupby("period", as_index=False)[["units_refunded", "units"]].sum()
-        grouped[metric] = grouped["units_refunded"].div(grouped["units"].replace(0, pd.NA)).fillna(0)
+        grouped[metric] = grouped["units_refunded"].div(
+            grouped["units"].replace(0, pd.NA)
+        )
         return grouped[["period", metric]]
-    if metric == "attachment_rate":
+    if metric == "addon_unit_share":
         grouped = frame.groupby("period", as_index=False)[["addon_units", "units"]].sum()
-        grouped[metric] = grouped["addon_units"].div(grouped["units"].replace(0, pd.NA)).fillna(0)
+        grouped[metric] = grouped["addon_units"].div(
+            grouped["units"].replace(0, pd.NA)
+        )
         return grouped[["period", metric]]
     return frame.groupby("period", as_index=False)[metric].sum()
 
@@ -691,6 +910,7 @@ def basket_mix(
     item_roles: tuple[str, ...] | None = None,
     order_sizes: tuple[str, ...] | None = None,
 ) -> pd.DataFrame:
+    _validate_product_filter_values(item_roles or (), order_sizes or ())
     dimension_where, dimension_params = _dimension_where(filters, period, alias="s")
     start, end = period.sql_bounds()
     params: list[object] = [start, end, *dimension_params]
@@ -711,7 +931,7 @@ def basket_mix(
                 exists_parts.append(f"p.product_name IN ({','.join('?' for _ in products)})")
                 params.extend(products)
             if item_roles is not None:
-                role_values = tuple(1 if value == "Primary" else 0 for value in item_roles)
+                role_values = tuple(PRODUCT_ROLE_VALUES[value] for value in item_roles)
                 exists_parts.append(f"oi.is_primary_item IN ({','.join('?' for _ in role_values)})")
                 params.extend(role_values)
             clauses.append(

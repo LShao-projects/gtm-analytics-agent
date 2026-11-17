@@ -1,6 +1,8 @@
+from pathlib import Path
+
 import pytest
 
-from dashboard.data import REQUIRED_COLUMNS
+from dashboard.data import DatabaseMetadata, REQUIRED_COLUMNS
 from dashboard.guide import (
     CAMPAIGN_DEFINITIONS,
     GUIDE_SECTIONS,
@@ -8,6 +10,7 @@ from dashboard.guide import (
     RELATIONSHIP_ROWS,
     TABLE_SPECS,
     campaign_distribution,
+    fact_freshness_inventory,
     masked_value_inventory,
     table_profile,
     table_sample,
@@ -72,7 +75,8 @@ def test_masked_values_are_documented_without_claiming_unknown_content():
     assert set(ads["raw_value"]) == {
         "g_ad_1", "g_ad_2", "b_ad_1", "b_ad_2", "social_ad_1", "social_ad_2"
     }
-    assert ads.loc[ads["raw_value"] == "b_ad_1", "known_context"].item() == "Bsearch · Nonbrand campaign"
+    assert ads.loc[ads["raw_value"] == "b_ad_1", "known_context"].item() == "Bsearch (Nonbrand campaign)"
+    assert not ads["known_context"].str.contains(" · ", regex=False).any()
     assert set(landings["raw_value"]) == {
         "/home", "/lander-1", "/lander-2", "/lander-3", "/lander-4", "/lander-5"
     }
@@ -99,6 +103,61 @@ def test_guide_has_three_reference_sections_without_a_free_form_qa_page():
         "Products & Refunds",
     }
     assert all("FAQ" not in section and "Q&A" not in section for section in GUIDE_SECTIONS)
+
+
+def test_product_refund_metrics_use_basis_specific_names():
+    product_labels = {row[0] for row in METRIC_GUIDES["Products & Refunds"]}
+
+    assert "Purchase-cohort refund rate (Purchase date)" in product_labels
+    assert "Refund event ratio (Refund date)" in product_labels
+    assert "Refund rate — Refund date" not in product_labels
+
+
+def test_funnel_guide_names_thank_you_reach_as_sessions_not_orders():
+    funnel_labels = {row[0] for row in METRIC_GUIDES["Website Funnel"]}
+
+    assert "Observed thank-you sessions" in funnel_labels
+    assert "Orders" not in funnel_labels
+
+
+def test_fact_freshness_inventory_keeps_each_table_cutoff_distinct():
+    metadata = DatabaseMetadata(
+        path=Path("example.db"),
+        table_count=6,
+        session_min="2012-03-19 08:04:16",
+        session_max="2015-03-19 07:59:08",
+        pageview_max="2015-03-18 23:59:59",
+        order_max="2015-03-17 22:00:00",
+        item_max="2015-03-16 21:00:00",
+        refund_max="2015-04-01 18:11:08",
+    )
+
+    freshness = fact_freshness_inventory(metadata).set_index("Fact table")
+
+    assert freshness["Data through"].to_dict() == {
+        "website_sessions": "2015-03-19",
+        "website_pageviews": "2015-03-18",
+        "orders": "2015-03-17",
+        "order_items": "2015-03-16",
+        "order_item_refunds": "2015-04-01",
+    }
+
+
+def test_fact_freshness_inventory_marks_missing_cutoffs_unavailable():
+    metadata = DatabaseMetadata(
+        path=Path("empty.db"),
+        table_count=6,
+        session_min=None,
+        session_max=None,
+        pageview_max=None,
+        order_max=None,
+        item_max=None,
+        refund_max=None,
+    )
+
+    freshness = fact_freshness_inventory(metadata)
+
+    assert freshness["Data through"].tolist() == ["Unavailable"] * 5
 
 
 def test_relationship_reference_covers_each_logical_join_once():

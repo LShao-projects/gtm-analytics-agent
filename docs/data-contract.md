@@ -69,13 +69,13 @@ CSV source data
 - gross revenue 或 net revenue；
 - orders；
 - sessions；
-- conversion rate；
+- order rate（event-period orders / sessions）；
 - average order value（AOV）；
 - gross margin；
-- refund rate；
+- refund event ratio；
 - 与 comparison period 的 delta；
-- `gross revenue = sessions × conversion rate × average order value` 这一分解关系；
-- 当前期间按 traffic source 排列的 revenue。
+- `gross revenue = sessions × order rate × gross average order value` 这一分解关系；
+- comparison 存在时，按所选 segment 维度可加总的 revenue-change contribution。
 
 实际运行时已经手动设置：
 
@@ -87,7 +87,7 @@ Compare with: Previous period
 ```
 
 页面正确显示为 `Jun 1–Jun 30, 2014 (Previous period)`，其他三页也保留了同一个时间窗口。Executive Overview
-显示 June 相对 May 的 revenue decline，并指出 conversion 是相对变化最大的分量。这只是 capability smoke check，
+显示 June 相对 May 的 revenue decline，并指出 order rate 是相对变化最大的分量。这只是 capability smoke check，
 不是已经冻结的 gold result。
 
 ### 3.2 Dashboard 现在能做什么？
@@ -95,15 +95,16 @@ Compare with: Previous period
 当前 dashboard 可以：
 
 1. 验证某个月环比变化确实发生；
-2. 把 gross revenue 的变化拆成 traffic volume、conversion 和 order value；
-3. 展示当前期间的 acquisition、funnel、product、basket、margin 和 refund evidence；
+2. 用 order-independent Shapley accounting decomposition 把 gross revenue 的变化拆成 sessions、order rate 和 gross AOV，并显式保留 event-timing residual；
+3. 展示 acquisition、funnel、product、basket、margin 和 refund 的 current/comparison evidence；
 4. 将 funnel stage 与 previous period 进行比较；
 5. 让四个页面共享同一个 date window 和 session filters。
 
 ### 3.3 Dashboard 现在还不能做什么？
 
-它还不能独立完成严谨的“原因解释”。原因是大部分 segment charts 展示的是**当前期间排名**，而不是每个 segment
-对月环比变化的 contribution。
+**Superseded 2026-11-16：** 初版 Dashboard 的 segment charts 主要展示当前期排名，不能当作 change
+contribution。Milestone 2.5 已加入 deterministic prior/current segment delta，并在 comparison 存在时按绝对 dollar
+impact 排序和对账；`Compare=None` 时则明确降级为 current-period ranking。
 
 ```text
 当前收入最大的 segment
@@ -111,7 +112,9 @@ Compare with: Previous period
 造成两个月收入差异最大的 segment
 ```
 
-因此，后续 agent 必须调用 deterministic delta/contribution tools，不能直接把当前排名当成 revenue decline 的解释。
+当前剩余限制不是“没有 contribution calculation”，而是这些 contribution 仍是 observed accounting movement，不能证明
+causality。后续 agent 必须复用同一 deterministic calculation，并把 external、operational 或实验原因标记为 unknown 或
+hypothesis。
 
 ### 3.4 2026-11-16 新增的 Data Guide
 
@@ -138,7 +141,7 @@ Dashboard 现在增加了一页英文 `Data Guide`，把本文档中已经核验
   expander 之间保留明确间距。
 
 实现证据：`dashboard/guide.py`、`dashboard/display.py`、`dashboard/labels.py` 和 `dashboard/ui.py`。2026-11-16
-最新完整测试结果为 `69 passed in 10.15s`，并已在运行中的 Streamlit 页面完成视觉检查。
+最新完整测试结果为 `127 passed in 15.22s`，并已在运行中的 Streamlit 页面完成 346px 窄屏及与用户截图对应的 1512 CSS px / 3024 physical px Chrome 检查；品牌与 Sidebar 对齐、左置强 active 固定导航、无活动竖线且为 overlay scrollbar 预留右侧安全区的独立筛选列、Acquisition 默认 Sessions、Data Guide 统一字色、KPI help card、蓝紫 comparison 颜色和同行图表等高的最新证据见 `docs/decisions.md` 的 2026-11-17 版面恢复记录。第一版的 768px 与 390px 响应式检查仍见 Milestone 2.5 记录。
 
 ## 4. 四个 Dashboard 页面到底在做什么？
 
@@ -146,8 +149,8 @@ Dashboard 现在增加了一页英文 `Data Guide`，把本文档中已经核验
 
 | Control | 可选值或行为 | 在 investigation 中的含义 |
 | --- | --- | --- |
-| Reporting window | Latest 12/6/3 months、All history、Custom | Custom 可通过设置相同的 start/end month 选择一个完整自然月 |
-| Compare with | Previous period、Previous year、None | 单月窗口选择 Previous period 时，会自动使用前一个自然月 |
+| Reporting window | Latest 12/6/3 covered months、All covered history、Custom | 共享日历使用 core-fact month-coverage heuristic；当前可用月份为 2012-04 至 2015-02，这不是 source-system close certification |
+| Compare with | Previous period、Previous year、None | UI 显示解析后的 exact comparison window；落在 covered-month heuristic 边界前的 comparison mode 不可选 |
 | Traffic source | Paid Search、Paid Social、Organic Search、Direct | 共用 session attribution filter；active dataset 没有 Other，因此 UI 和 Data Guide 均不显示空类别 |
 | Campaign | Brand、Nonbrand、Desktop targeted、Pilot、Untracked | 带业务标签的 raw campaign filter |
 | Device | desktop、mobile | Session 使用的 device |
@@ -163,10 +166,10 @@ start <= timestamp < 所选结束月份之后的第一天
 
 | 页面 | 页面上看得到什么 | 页面专属 controls | 调用的 metric functions | 在调查中的作用 | 当前限制 |
 | --- | --- | --- | --- | --- | --- |
-| Executive Overview | Revenue、orders、sessions、conversion、AOV、margin、refund rate、net revenue、KPI deltas、trend、traffic/conversion/AOV index | Time grain、Gross/Net basis、Primary KPI | `overview_kpis`、`overview_trend`、`overview_drivers` | 确认变化，并决定先查 traffic、conversion 还是 AOV | Traffic-source chart 只显示当前 gross revenue，不是各 source 的 change contribution；即使页面选 Net，该 chart 仍为 Gross |
-| Acquisition | Sessions、orders、conversion、revenue/session 的整体 delta；当前 source、campaign、device、landing page 排名 | Ad content、referrer type、landing page、metric | `acquisition_performance` | 定位不同 acquisition dimensions 的 traffic quality 与 conversion pattern | Segment charts 只有当前值，没有 previous-period delta/contribution；没有 ad spend，所以 revenue/session 不是 ROAS |
-| Website Funnel | Sessions、observed thank-you events、total conversion delta、当前 stage reach/drop-off、detail table 中的 prior total conversion | Landing page、product page、funnel version、compare dimension | `funnel_summary`、`funnel_breakdown` | 当 conversion 发生变化时，沿 ordered funnel 查找变化出现在哪个 stage | 这是基于 pageview order 的 session cohort，不是 causal experiment；最后事件是 thank-you pageview |
-| Products & Refunds | Revenue、units、margin、refund-rate delta，当前 product、basket、add-on 与 refund evidence，aggregate monthly trend | Product、item role、order size、purchase/refund date basis、metric | `product_performance`、`product_trend`、`aggregate_product_trend`、`basket_mix` | 当 AOV、mix、basket、margin 或 refund 变化时继续调查 | Product ranking 是当前值，不是 product 对 MoM change 的 contribution；refund 解读取决于 date basis |
+| Executive Overview | Gross/Net revenue、orders、sessions、order rate、gross AOV、basis-correct margin、refund event ratio、exact KPI deltas、comparison trend、deterministic revenue-driver and segment contributions | Time grain、Gross/Net basis、Primary KPI、Contribution dimension | `overview_kpis`、`overview_trend`、`overview_drivers`、`revenue_driver_contributions`、`segment_contributions` | 确认变化，并判断 sessions、order rate、AOV、recorded refunds 或哪个 segment 值得先查 | Contributions 是可加总的 observed accounting change，不是 causal effect |
+| Acquisition | Sessions、orders、order rate、revenue/session 的整体 delta；raw UTM source、campaign、device、landing page 的 current/comparison 图 | Ad content、referrer type、landing page、metric | `acquisition_performance` | 定位 acquisition dimensions 的 traffic volume 与 on-site yield pattern | 没有 ad spend，所以 revenue/session 不是 ROAS；order rate 是 event-period yield，不是 purchasing-session conversion probability |
+| Website Funnel | Sessions、observed thank-you sessions、total conversion delta、ordered stage reach、transition drop-off、segment comparison 与统一 detail table | Landing page、product-detail page、billing path、comparison dimension | `funnel_summary`、`funnel_breakdown` | 当 funnel conversion 发生变化时，沿 ordered pageview path 定位差异 | 基于 session cohort 的 descriptive evidence；billing paths 不是实验 assignment，最后事件是 thank-you pageview |
+| Products & Refunds | Purchase-date sales economics、basis-specific refund metric、product/refund/basket comparison、aggregate monthly current/comparison trend | Product、item role、order size、refund basis、metric | `product_performance`、`product_trend`、`aggregate_product_trend`、`basket_mix` | 当 AOV、mix、basket、margin 或 refund 变化时继续调查 | Sales 始终由 item purchase date 拥有；refund 解读取决于明确显示的 basis；add-on unit share 不是 order attach rate |
 
 ### 4.3 已经算出来、但没有直接作为 change factor 展示的内容
 
@@ -174,12 +177,12 @@ start <= timestamp < 所选结束月份之后的第一天
 | --- | --- | --- |
 | 按 ad content 或 referrer type 的 acquisition | `DIMENSION_EXPRESSIONS`、`acquisition_performance` | 两者目前是 filters，没有对应 breakdown chart |
 | 按 session type 的 acquisition | `acquisition_performance` | Session type 是 global filter，没有 comparison chart |
-| Campaign、device、session type、referrer type overview drivers | `overview_drivers` | Executive Overview 目前只调用 Traffic source |
+| Referrer-type overview driver | `overview_drivers` | Executive Overview 的 contribution selector 目前提供 Traffic source、raw UTM source、Campaign、Device、Session type，未提供 Referrer type |
 | 按 session type 比较 funnel | `funnel_breakdown` | UI 的 Compare by 没有 Session type |
 | Product net revenue | `product_performance` | 已计算，但不是可选 chart metric |
 | Basket revenue 与 AOV | `basket_mix` | 当前 basket chart 只展示 order count |
 | Executive Overview 的 refund amount | `overview_kpis`、`overview_trend` | 页面显示 refund rate 和 net revenue，没有 refund dollars KPI card |
-| Segment change contribution | 尚未实现 | 后续必须补；不能把 current-period ranking 当作 change contribution |
+| Product change contribution decomposition | `product_performance` | UI 比较各 product 的 current/comparison 值，但未把 product delta 定义为公司 revenue change 的独立 causal factor |
 
 ### 4.4 未来 Agent 需要从 Dashboard 接收什么 Context？
 
@@ -204,8 +207,8 @@ is_partial_period
 
 - Executive Overview：time grain、revenue basis、primary KPI；
 - Acquisition：ad content、referrer type、landing page、selected metric；
-- Website Funnel：landing page、product page、funnel version、comparison dimension；
-- Products & Refunds：product、item role、order size、date basis、selected metric。
+- Website Funnel：landing page、product-detail page、billing path、comparison dimension；
+- Products & Refunds：product、item role、order size、refund basis、selected metric。
 
 不能把整个 Streamlit session state 交给 agent。当前还没有 chart-mark selection、evidence ID 或 typed resolved
 comparison period，这些是后续 implementation gaps，不是当前已经存在的能力。
@@ -288,7 +291,7 @@ desktop-targeted/pilot；未追踪 sessions 的三个字段均使用 sentinel。
 | `pageview_url` | TEXT | 无缺失；16 个 distinct URLs | 访问页面；session 中最小 ID 定义 landing page；指定 URL 定义 funnel stages |
 
 Funnel URL 包括 `/products`、四个 product-detail paths、`/cart`、`/shipping`、`/billing`、`/billing-2`
-和 `/thank-you-for-your-order`。`/billing` 标为 Original，`/billing-2` 标为 Optimized。
+和 `/thank-you-for-your-order`。UI 将二者分别标为 observed `/billing` path 和 observed `/billing-2` path；raw data 没有 experiment assignment，不能称为 Original/Optimized treatment 效果。
 
 **实际前五行：**
 
@@ -496,10 +499,11 @@ Normalization 会将 SQL `NULL` 和文本 `"NULL"` 都当作缺失。
 | Sessions | count session rows | Session | `website_sessions.created_at` | 所有页面 / `overview_kpis` | 计算 visits，不是 users |
 | Orders | count order rows | Order | `orders.created_at` | Executive、Acquisition / `overview_kpis`、`acquisition_performance` | Acquisition attributes 来自原始 session |
 | Gross revenue | sum `orders.price_usd` | Order | `orders.created_at` | Executive / `overview_kpis`、`overview_trend` | 不能在 pageview/item fan-out 后直接相加 |
-| Conversion rate | Orders / Sessions | Order 与 session 分别先聚合 | Orders 使用 order time；Sessions 使用 session time | Executive、Acquisition | 属于 event-period rate，不是 experiment，也不是严格 session cohort；全数据仅六笔 order 跨月 |
+| Order rate | Order events / Session events | Order 与 session 分别先聚合 | Orders 使用 order time；Sessions 使用 session time | Executive、Acquisition | 内部字段仍为 `conversion_rate`；公开名称改为 Order rate，避免 multi-order session 被误读为 purchasing-session conversion probability |
 | AOV | Gross revenue / Orders | Order | `orders.created_at` | Executive | 基于 gross order revenue |
 | Order COGS | sum `orders.cogs_usd` | Order | `orders.created_at` | Executive | Product reporting 改用 item COGS |
-| Gross margin | Gross revenue − order COGS | Order | `orders.created_at` | Executive、Acquisition | Executive 选 Net 时还会减去该期间的 refund dollars |
+| Gross margin | Gross revenue − order COGS | Order | `orders.created_at` | Executive、Acquisition | 始终保持退款前 gross metric，不随 Revenue basis 改义 |
+| Margin after recorded refunds | Gross margin − selected period 内记录的 refund dollars | Order + refund event | 混合 order-event 与 refund-event time | Executive Net view | 与 Gross margin 分开命名；不是 company net profit |
 | Revenue/session | Gross revenue / Sessions | Orders、sessions 分别聚合 | 混合上述两个时间口径 | Acquisition | 不是 ROAS，因为没有 ad spend |
 | Margin/session | Gross margin / Sessions | Orders、sessions 分别聚合 | 同上 | Acquisition | 数据不含 COGS 之外的 product/refund costs |
 
@@ -508,7 +512,7 @@ Normalization 会将 SQL `NULL` 和文本 `"NULL"` 都当作缺失。
 ```text
 Gross revenue
 = Sessions × (Orders / Sessions) × (Gross revenue / Orders)
-= Sessions × Conversion rate × AOV
+= Sessions × Order rate × Gross AOV
 ```
 
 这是 accounting identity，不代表其中一个 factor 的变化因果上导致了另一个 factor。
@@ -519,15 +523,15 @@ Gross revenue
 | --- | --- | --- | --- |
 | Refund amount | sum `refund_amount_usd` | Executive 和 Refund-date view 使用 refund-event time | Refund 可能对应更早销售；source/device attribution 来自原 order session |
 | Net revenue | 期间内 gross order revenue − 期间内记录的 refund events | 混合 order-event 与 refund-event periods | 不是 same-purchase cohort metric |
-| Executive refund rate | 期间内 refund events / 期间内 sold items | 混合 refund-event 与 item-purchase periods | 分子分母不一定来自同一批商品 |
-| Product refund rate，Purchase date | Purchase-period cohort 中后来退款的 items / 该期间 sold items | Item purchase time | 可以包含 displayed period 之后发生的 refund |
-| Product refund rate，Refund date | 期间内 refund events / 同一 displayed period 内购买的 items | 混合 event periods | UI 会明确提示 denominator |
+| Executive refund event ratio | 期间内 refund events / 期间内 sold items | 混合 refund-event 与 item-purchase periods | 分子分母不一定来自同一批商品，不能简称 cohort refund rate |
+| Purchase-cohort refund rate，Purchase date | Purchase-period cohort 中后来退款的 items / 该期间 sold items | Item purchase time | 可以包含 displayed period 之后发生的 refund |
+| Refund event ratio，Refund date | 期间内 refund events / 同一 displayed period 内购买的 items | 混合 event periods | 分母为零时显示 unavailable；UI 会明确提示 denominator |
 
 因为 date basis 回答的是不同问题，每个 agent tool 和 report 都必须明确写出所选 basis。
 
 ### 9.3 Funnel metrics
 
-Funnel 先选择在 period 内创建的 sessions，再查看这些 sessions 的全部 pageviews。每一个 stage 的第一条匹配
+Funnel 先选择在 period 内创建的 sessions，再查看这些 sessions 的全部 pageviews。Product-detail page control 约束 Product detail 及其 downstream stages，不缩小 Landing denominator。每一个 stage 的第一条匹配
 pageview ID 必须大于上一 stage 的 ID：
 
 ```text
@@ -553,7 +557,7 @@ Funnel 描述 observed navigation，不能证明用户为什么流失，也不�
 | Product COGS | sum `order_items.cogs_usd` | Item / item purchase time | 全部 items 合计后与 order COGS 完全 reconcile |
 | Product gross margin | Item revenue − item COGS | Item / item purchase time | 退款前 margin |
 | Product net revenue | Item revenue − 按所选 basis 匹配的 refund amount | Item + refund | 已计算，但目前不能作为 chart selector |
-| Attachment rate | Add-on item units / selected product units | Item | 不是“包含 add-on 的 orders 占比” |
+| Add-on unit share | Add-on item units / selected product units | Item | 不是“包含 add-on 的 orders 占比”，因此不再标为 Attachment rate |
 | Basket mix | 将 orders 分为 1 item 与 >1 item | Order / `orders.created_at` | 当前数据只有 1-item 或 2-item orders |
 
 ## 10. 四个跨表计算例子
@@ -652,10 +656,12 @@ product price、unit mix 或 multi-item basket mix，但不能解释顾客为什
 
 各项 state 已存在，但还没有小型、versioned context schema。Agent 不能读取 arbitrary Streamlit state。
 
-### 12.3 还没有真正的 Change-contribution Calculation
+### 12.3 Change-contribution Calculation 已在 Dashboard 实现
 
-当前 charts 主要排序 current-period values。Milestone 4 必须增加 deterministic prior/current deltas 和
-contribution ranking，agent 才能将一个 segment 称为 measured driver of change。
+**Superseded 2026-11-16：** “当前 charts 只有 current-period ranking、需到 Milestone 4 才实现 contribution”的判断
+已过时。Milestone 2.5 已实现 deterministic revenue-driver 和 segment contribution；两者均与所选 Gross/Net revenue
+change 对账，并明确标为 observed、not causal。Milestone 4 仍需把这些现有函数包装成受限 agent tools，而不是重新定义
+计算。
 
 ### 12.4 Date-basis 容易混淆
 
@@ -664,8 +670,9 @@ metrics 会混合不同 event periods。
 
 ### 12.5 最后一个月份不完整
 
-March 2015 的 sessions/orders 不完整，refund events 则延伸到 April。Agent 必须显示 data-through 和
-partial-period status，不能把不完整月份当作完整月份比较。
+March 2015 的 sessions/orders 只覆盖到月中，refund events 则延伸到 April。共享 UI 采用逐 fact cutoff 的 month-coverage
+heuristic，并只暴露 2012-04 至 2015-02；这不等于 source-system close certification。Agent 必须显示各 fact freshness，
+不能把 heuristic 边界外月份当作可比月份。
 
 ## 13. 获批的第一条 Midpoint Investigation Path
 
@@ -673,7 +680,7 @@ partial-period status，不能把不完整月份当作完整月份比较。
 
 ```text
 1. Executive Overview 验证 selected gross-revenue change。
-2. Deterministic code 将其拆成 sessions、conversion rate 和 AOV。
+2. Deterministic code 将其拆成 sessions、order rate 和 gross AOV。
 3. Deterministic segment deltas 按 measured business impact 排名。
 4. 如果 conversion 的变化重要，继续检查 ordered funnel 与 acquisition segments。
 5. 如果 AOV 的变化重要，继续检查 product mix、item role 与 basket size。
@@ -690,10 +697,10 @@ calculation，但 exact gold values 仍需在 Milestone 3 审核：
 
 - [x] Executive Overview 是 month-over-month investigation 的主入口。
 - [x] Gross revenue 使用 order event time 和 order-level `price_usd`。
-- [x] Conversion rate 使用当前展示的 event-period `orders / sessions`，并接受上述 timestamp caveat。
+- [x] ~~Conversion rate 使用当前展示的 event-period `orders / sessions`，并接受上述 timestamp caveat。~~ **Superseded 2026-11-16：** 公式和 timestamp caveat 保留，公开名称改为 Order rate，避免被误读为 purchasing-session conversion probability。
 - [x] AOV = gross order revenue / orders。
 - [x] Executive Net revenue 减去 selected period 内记录的 refund events。
-- [x] Refund rate 必须始终说明使用 Purchase-date 还是 Refund-date semantics。
+- [x] ~~Refund rate 必须始终说明使用 Purchase-date 还是 Refund-date semantics。~~ **Clarified 2026-11-16：** Purchase date 公开名称为 Purchase-cohort refund rate；Refund date 公开名称为 Refund event ratio。
 - [x] Current-period segment ranking 不能当作 change contribution。
 - [x] Funnel 只能作为 descriptive ordered-pageview evidence，不能声称 causality。
 - [x] 第 13 节是获批的 midpoint 第一条 investigation path。

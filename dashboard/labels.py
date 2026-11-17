@@ -25,8 +25,8 @@ PAGE_URL_LABELS = {
     "/the-hudson-river-mini-bear": "Hudson River Mini Bear product page",
     "/cart": "Cart (/cart)",
     "/shipping": "Shipping (/shipping)",
-    "/billing": "Original billing page (/billing)",
-    "/billing-2": "Optimized billing page (/billing-2)",
+    "/billing": "Observed billing path (/billing)",
+    "/billing-2": "Observed billing path (/billing-2)",
     "/thank-you-for-your-order": "Order confirmation page",
 }
 

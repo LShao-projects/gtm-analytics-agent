@@ -153,40 +153,41 @@ CAMPAIGN_DEFINITIONS = {
 
 
 MASKED_AD_CONTEXT = {
-    "g_ad_1": "Gsearch · Nonbrand campaign",
-    "g_ad_2": "Gsearch · Brand campaign",
-    "b_ad_1": "Bsearch · Nonbrand campaign",
-    "b_ad_2": "Bsearch · Brand campaign",
-    "social_ad_1": "Socialbook · Pilot campaign",
-    "social_ad_2": "Socialbook · Desktop targeted campaign",
+    "g_ad_1": "Gsearch (Nonbrand campaign)",
+    "g_ad_2": "Gsearch (Brand campaign)",
+    "b_ad_1": "Bsearch (Nonbrand campaign)",
+    "b_ad_2": "Bsearch (Brand campaign)",
+    "social_ad_1": "Socialbook (Pilot campaign)",
+    "social_ad_2": "Socialbook (Desktop targeted campaign)",
 }
 
 
 METRIC_GUIDES = {
     "Executive Overview": (
-        ("Revenue", "Gross: SUM(orders.price_usd). Net: gross revenue minus refund events in the selected period.", "Order / refund event", "The Channel contribution chart remains gross even when Net is selected."),
+        ("Revenue", "Gross: SUM(orders.price_usd). Net: gross revenue minus refund events in the selected period.", "Order / refund event", "The selected basis is used consistently in the KPI, trend, and contribution views."),
         ("Orders", "Count of orders placed in the selected period.", "Order", "Order time owns the period."),
         ("Sessions", "Count of website sessions started in the selected period.", "Session", "Counts visits, not unique users."),
-        ("Conversion rate", "Orders ÷ Sessions.", "Order and session aggregated separately", "An event-period rate, not a controlled experiment."),
+        ("Order rate", "Order events ÷ session events.", "Order and session aggregated separately", "An event-period yield rate, not a purchasing-session conversion rate or controlled experiment."),
         ("Average order value", "Gross order revenue ÷ Orders.", "Order", "Always uses gross order revenue."),
-        ("Gross margin", "Gross order revenue − order COGS; Net basis also subtracts refund amount.", "Order / refund event", "Does not include advertising or operating expenses."),
-        ("Refund rate", "Refund events in the period ÷ items sold in the period.", "Refund event / item", "The numerator and denominator need not represent the same purchase cohort."),
+        ("Gross margin", "Gross order revenue − order COGS.", "Order", "Always remains a pre-refund gross-margin measure and excludes advertising and operating expenses."),
+        ("Margin after recorded refunds", "Gross margin − refund amount recorded in the selected period.", "Order / refund event", "A separate mixed-event-period measure; it is not company net profit."),
+        ("Refund event ratio", "Refund events in the period ÷ items sold in the period.", "Refund event / item", "The numerator and denominator need not represent the same purchase cohort."),
         ("Net revenue", "Gross order revenue − refund events recorded in the selected period.", "Order / refund event", "Mixes order-event and refund-event timing."),
-        ("Revenue drivers", "Revenue = Sessions × Conversion rate × Average order value.", "Mixed, separately aggregated", "An accounting identity, not a causal claim."),
-        ("Channel contribution", "Gross order revenue grouped by derived Traffic source.", "Order attributed to session", "Shows current-period concentration, not contribution to period-over-period change."),
-        ("Driver detail", "Session and order measures by the same derived Traffic-source categories.", "Session / order", "Each grain is aggregated before display to avoid duplication."),
+        ("Observed revenue-change contributions", "Order-independent Shapley decomposition across Sessions, Order rate, and gross AOV; Net adds recorded-refund impact.", "Mixed, separately aggregated", "Dollar contributions reconcile to observed revenue change and are not causal claims."),
+        ("Segment contribution", "Current revenue minus comparison revenue for each selected segment.", "Order attributed to session", "Segments are outer-joined so entries and exits reconcile to the total observed change."),
+        ("Contribution detail", "Current, comparison, absolute delta, and share of total delta by the selected dimension.", "Session / order / refund event", "Each fact grain is aggregated before display to avoid duplication."),
     ),
     "Acquisition": (
         ("Sessions", "Count of sessions in the selected acquisition segment.", "Session", "Segment attributes come from website_sessions."),
-        ("Orders", "Count of orders linked to selected sessions.", "Order attributed to session", "One purchasing session has at most one order in current data."),
-        ("Conversion rate", "Linked orders ÷ selected sessions.", "Order / session", "Descriptive segment comparison."),
-        ("Revenue per session", "Gross revenue from linked orders ÷ selected sessions.", "Order / session", "Not ROAS because advertising spend is unavailable."),
+        ("Orders", "Count of orders recorded in the selected period, attributed to their original session segment.", "Order event attributed to session", "Supports multiple orders per session and orders occurring after the session month."),
+        ("Order rate", "Event-period order events ÷ event-period session events.", "Order event / session event", "A descriptive yield ratio, not a purchasing-session conversion rate or controlled experiment."),
+        ("Revenue per session", "Event-period gross revenue ÷ event-period sessions.", "Order event / session event", "Not ROAS because advertising spend is unavailable."),
         ("Gross margin per session", "(Gross order revenue − order COGS) ÷ selected sessions.", "Order / session", "Excludes advertising and operating expenses."),
-        ("Quality charts", "The selected metric ranked by Traffic source, Campaign, Device, or Landing page.", "Selected dimension", "Ranks current values, not period-over-period contribution."),
+        ("Volume and efficiency charts", "The selected metric by raw UTM source, Campaign, Device, or Landing page.", "Selected dimension", "Current and comparison periods are aligned by segment when a comparison is available."),
     ),
     "Website Funnel": (
         ("Sessions", "Selected-cohort sessions at the Landing stage.", "Session", "The cohort is defined by session start time."),
-        ("Orders", "Sessions that reached /thank-you-for-your-order.", "Session pageview path", "This card observes the final pageview; it does not count orders rows directly."),
+        ("Observed thank-you sessions", "Sessions that reached /thank-you-for-your-order.", "Session pageview path", "This card observes the final pageview; it does not count orders rows directly."),
         ("Conversion rate", "Thank-you-stage sessions ÷ Landing-stage sessions.", "Session", "Descriptive funnel conversion."),
         ("Step conversion", "Current-stage sessions ÷ preceding-stage sessions.", "Session", "Stages must appear in the required order."),
         ("Total conversion", "Current-stage sessions ÷ Landing-stage sessions.", "Session", "Measures reach from the start of the funnel."),
@@ -198,9 +199,9 @@ METRIC_GUIDES = {
         ("Units sold", "Count of selected order-item rows.", "Order item", "Each row represents one sold item in current data."),
         ("Gross margin", "Selected item revenue − selected item COGS.", "Order item", "Not company net profit."),
         ("Refunded amount", "SUM(order_item_refunds.refund_amount_usd).", "Refund event", "Attributed back to the original order and session."),
-        ("Refund rate — Purchase date", "Purchase-cohort items later refunded ÷ units in that purchase cohort.", "Order item cohort", "May include refunds recorded after the displayed purchase period."),
-        ("Refund rate — Refund date", "Refund events in the period ÷ items purchased in the same calendar period.", "Refund event / item", "The numerator and denominator are different event populations."),
-        ("Attachment rate", "Selected-product units sold as Add-ons ÷ selected-product units.", "Order item", "Primary/Add-on is taken from is_primary_item."),
+        ("Purchase-cohort refund rate (Purchase date)", "Purchase-cohort items later refunded ÷ units in that purchase cohort.", "Order item cohort", "May include refunds recorded after the displayed purchase period."),
+        ("Refund event ratio (Refund date)", "Refund events in the period ÷ items purchased in the same calendar period.", "Refund event / item", "The numerator and denominator are different event populations."),
+        ("Add-on unit share", "Selected add-on units ÷ selected units.", "Order item", "This is a unit-mix share, not the share of orders containing an add-on."),
         ("Basket mix", "Orders grouped as Single-item or Multi-item.", "Order", "Uses orders.items_purchased."),
     ),
 }
@@ -302,6 +303,25 @@ def masked_value_inventory() -> tuple[pd.DataFrame, pd.DataFrame]:
         for raw_value in ("/home", "/lander-1", "/lander-2", "/lander-3", "/lander-4", "/lander-5")
     ]
     return pd.DataFrame(ad_rows), pd.DataFrame(landing_rows)
+
+
+def fact_freshness_inventory(metadata: DatabaseMetadata) -> pd.DataFrame:
+    facts = (
+        ("website_sessions", metadata.session_max),
+        ("website_pageviews", metadata.pageview_max),
+        ("orders", metadata.order_max),
+        ("order_items", metadata.item_max),
+        ("order_item_refunds", metadata.refund_max),
+    )
+    return pd.DataFrame(
+        (
+            {
+                "Fact table": table,
+                "Data through": timestamp[:10] if timestamp else "Unavailable",
+            }
+            for table, timestamp in facts
+        )
+    )
 
 
 def _erd_table(
@@ -463,12 +483,15 @@ def _render_raw_data(path: str | Path, metadata: DatabaseMetadata) -> None:
     st.markdown("### What is in the source database?")
     st.caption("Six read-only source tables power every dashboard calculation. Samples below come from the active local database.")
 
-    columns = st.columns(3)
+    columns = st.columns(2)
     columns[0].metric("Source tables", metadata.table_count)
     session_start = metadata.session_min[:10] if metadata.session_min else "Unavailable"
     session_end = metadata.session_max[:10] if metadata.session_max else "Unavailable"
     columns[1].metric("Session coverage", f"{session_start} to {session_end}")
-    columns[2].metric("Refund data through", metadata.refund_max[:10] if metadata.refund_max else "Unavailable")
+
+    st.markdown("#### Event-table freshness")
+    st.caption("Each event table keeps its own cutoff so reporting coverage can be audited fact by fact.")
+    _render_guide_dataframe(fact_freshness_inventory(metadata))
 
     st.markdown("#### Relationship map")
     st.caption("Logical ERD for the five core analysis joins. Cardinality labels show the observed relationship in this dataset.")
@@ -479,8 +502,10 @@ def _render_raw_data(path: str | Path, metadata: DatabaseMetadata) -> None:
         with st.expander(f"{table} — {spec['grain']}", expanded=False):
             st.markdown(spec["description"])
             st.markdown(
-                f"**Rows:** {profile['rows']:,}  ·  **Primary key:** `{spec['primary_key']}`  ·  "
-                f"**Time range:** {profile['first_at']} to {profile['last_at']}"
+                f"**Rows:** {profile['rows']:,}<br>"
+                f"**Primary key:** `{spec['primary_key']}`<br>"
+                f"**Time range:** {profile['first_at']} to {profile['last_at']}",
+                unsafe_allow_html=True,
             )
             fields = pd.DataFrame(spec["fields"], columns=["Field", "Type", "Business meaning"])
             with st.container(key=f"guide_fields_{table}"):
@@ -500,7 +525,9 @@ def _render_raw_data(path: str | Path, metadata: DatabaseMetadata) -> None:
         """
 - The source declares primary keys but no foreign-key or NOT NULL constraints; logical integrity is checked separately.
 - Text `NULL` and SQL `NULL` are normalized as missing acquisition values.
-- March 2015 session data is incomplete, while refund events extend into April 2015.
+- March 2012 and March 2015 do not satisfy the core-fact month-coverage heuristic. Shared reporting presets therefore use April 2012 through February 2015.
+- Refund events extend into April 2015. Their later freshness does not extend the shared reporting calendar.
+- A month passes the heuristic when each non-empty core fact table reaches that calendar month's final day. This indicates observed date coverage, not source-system close certification or proof that every instant of the day is complete.
 - Current order totals reconcile to item counts, item revenue, and item COGS, but application code should still preserve grain.
 - The dataset has no advertising spend, impressions, clicks, experiment assignments, or general operating expenses.
 """
@@ -565,7 +592,7 @@ def _render_derived_dimensions(path: str | Path) -> None:
 | Product detail | Any of the four product-detail URLs |
 | Cart | `/cart` |
 | Shipping | `/shipping` |
-| Billing | `/billing`, `/billing-2`, or the selected Funnel version |
+| Billing | `/billing`, `/billing-2`, or the selected Billing path |
 | Thank-you | `/thank-you-for-your-order` |
 
 The 16 raw URLs become seven business stages because landing, product-detail, and billing URLs are alternatives at

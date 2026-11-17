@@ -35,12 +35,19 @@ class DatabaseValidationError(RuntimeError):
     pass
 
 
+class DatabaseQueryError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class DatabaseMetadata:
     path: Path
     table_count: int
     session_min: str | None
     session_max: str | None
+    pageview_max: str | None
+    order_max: str | None
+    item_max: str | None
     refund_max: str | None
 
 
@@ -77,12 +84,30 @@ def validate_database(path: str | Path = DEFAULT_DATABASE) -> DatabaseMetadata:
             session_min, session_max = connection.execute(
                 "SELECT MIN(created_at), MAX(created_at) FROM website_sessions"
             ).fetchone()
+            pageview_max = connection.execute(
+                "SELECT MAX(created_at) FROM website_pageviews"
+            ).fetchone()[0]
+            order_max = connection.execute(
+                "SELECT MAX(created_at) FROM orders"
+            ).fetchone()[0]
+            item_max = connection.execute(
+                "SELECT MAX(created_at) FROM order_items"
+            ).fetchone()[0]
             refund_max = connection.execute(
                 "SELECT MAX(created_at) FROM order_item_refunds"
             ).fetchone()[0]
     except sqlite3.Error as exc:
         raise DatabaseValidationError(f"Unable to read database {database_path}: {exc}") from exc
-    return DatabaseMetadata(database_path, len(REQUIRED_COLUMNS), session_min, session_max, refund_max)
+    return DatabaseMetadata(
+        path=database_path,
+        table_count=len(REQUIRED_COLUMNS),
+        session_min=session_min,
+        session_max=session_max,
+        pageview_max=pageview_max,
+        order_max=order_max,
+        item_max=item_max,
+        refund_max=refund_max,
+    )
 
 
 def query_df(
@@ -91,6 +116,11 @@ def query_df(
     params: Sequence[object] = (),
 ) -> pd.DataFrame:
     database_path = Path(path)
-    with sqlite3.connect(_read_only_uri(database_path), uri=True) as connection:
-        return pd.read_sql_query(sql, connection, params=list(params))
+    try:
+        with sqlite3.connect(_read_only_uri(database_path), uri=True) as connection:
+            return pd.read_sql_query(sql, connection, params=list(params))
+    except (sqlite3.Error, pd.errors.DatabaseError) as exc:
+        raise DatabaseQueryError(
+            f"Unable to query database {database_path}: {exc}"
+        ) from exc
 

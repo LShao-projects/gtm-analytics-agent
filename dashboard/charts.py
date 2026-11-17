@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -7,11 +8,14 @@ from dashboard.theme import (
     BORDER,
     CHART_HEIGHT,
     CHART_PALETTE,
+    COMPARISON,
     EMPTY_CHART_HEIGHT,
     FUNNEL_CHART_HEIGHT,
     INK,
     MUTED,
     NAVY,
+    NEGATIVE,
+    POSITIVE,
     WHITE,
 )
 
@@ -56,13 +60,39 @@ def empty_figure(
     return _base_layout(figure, height=height)
 
 
-def _hover_format(value_format: str) -> str:
+def _hover_format(value_format: str, *, axis: str = "y") -> str:
     return {
-        "currency": "$%{y:,.2f}<extra></extra>",
-        "percent": "%{y:.2%}<extra></extra>",
-        "integer": "%{y:,.0f}<extra></extra>",
-        "decimal": "%{y:,.2f}<extra></extra>",
-    }.get(value_format, "%{y}<extra></extra>")
+        "currency": f"%{{{axis}:$,.2f}}<extra></extra>",
+        "percent": f"%{{{axis}:.2%}}<extra></extra>",
+        "integer": f"%{{{axis}:,.0f}}<extra></extra>",
+        "decimal": f"%{{{axis}:,.2f}}<extra></extra>",
+    }.get(value_format, f"%{{{axis}}}<extra></extra>")
+
+
+def _axis_style(value_format: str) -> dict[str, str]:
+    if value_format == "currency":
+        return {"tickformat": "$,.0f"}
+    if value_format == "percent":
+        return {"tickformat": ".1%"}
+    if value_format == "integer":
+        return {"tickformat": ",.0f"}
+    return {"tickformat": ",.2f"}
+
+
+def _numeric_range(values: pd.Series, *, label_padding: float = 0.24) -> list[float] | None:
+    numeric = pd.to_numeric(values, errors="coerce").dropna()
+    if numeric.empty:
+        return None
+    minimum = float(numeric.min())
+    maximum = float(numeric.max())
+    if minimum == maximum == 0:
+        return [0, 1]
+    if minimum >= 0 and maximum > 0:
+        return [0, maximum * (1 + label_padding)]
+    if maximum <= 0 and minimum < 0:
+        return [minimum * (1 + label_padding), 0]
+    extent = max(abs(minimum), abs(maximum)) * (1 + label_padding / 2)
+    return [-extent, extent]
 
 
 def _display_period(value: object) -> str:
@@ -91,16 +121,38 @@ def _display_axis_period(value: object) -> str:
 
 def _display_hover_value(value: float, value_format: str) -> str:
     if value_format == "currency":
-        if abs(value) >= 1_000_000:
-            return f"${value / 1_000_000:.2f}M"
-        if abs(value) >= 1_000:
-            return f"${value / 1_000:.2f}K"
-        return f"${value:,.2f}"
+        return f"-${abs(value):,.2f}" if value < 0 else f"${value:,.2f}"
     if value_format == "percent":
         return f"{value:.2%}"
     if value_format == "integer":
         return f"{value:,.0f}"
     return f"{value:,.2f}"
+
+
+def _display_bar_value(value: float, value_format: str) -> str:
+    if value_format == "currency":
+        sign = "-" if value < 0 else ""
+        magnitude = abs(value)
+        if magnitude >= 1_000_000:
+            return f"{sign}${magnitude / 1_000_000:.2f}M"
+        if magnitude >= 1_000:
+            return f"{sign}${magnitude / 1_000:.2f}K"
+        return f"{sign}${magnitude:,.2f}"
+    return _display_hover_value(value, value_format)
+
+
+def _safe_number(value: object) -> float | None:
+    number = pd.to_numeric(value, errors="coerce")
+    if pd.isna(number) or not np.isfinite(float(number)):
+        return None
+    return float(number)
+
+
+def _numeric_column(frame: pd.DataFrame, column: str) -> pd.DataFrame:
+    result = frame.copy()
+    result[column] = pd.to_numeric(result[column], errors="coerce")
+    result.loc[~np.isfinite(result[column]), column] = np.nan
+    return result
 
 
 def trend_chart(
@@ -115,18 +167,44 @@ def trend_chart(
     hover_context: str | None = None,
     display_title: bool = True,
 ) -> go.Figure:
-    if frame.empty or x not in frame or y not in frame:
+    current_has_columns = not frame.empty and x in frame and y in frame
+    comparison_has_columns = (
+        comparison is not None
+        and not comparison.empty
+        and x in comparison
+        and y in comparison
+    )
+    if not current_has_columns and not comparison_has_columns:
         return empty_figure()
+    frame = (
+        _numeric_column(frame, y)
+        if current_has_columns
+        else pd.DataFrame(columns=[x, y])
+    )
+    current_has_numeric = bool(frame[y].notna().sum())
+    if comparison_has_columns:
+        assert comparison is not None
+        comparison = _numeric_column(comparison, y)
+        if comparison[y].notna().sum() == 0:
+            comparison = None
+    else:
+        comparison = None
+    if not current_has_numeric and comparison is None:
+        return empty_figure("No numeric evidence is available")
     figure = go.Figure()
-    has_comparison = comparison is not None and not comparison.empty and x in comparison and y in comparison
+    has_comparison = comparison is not None
     if has_comparison:
         point_count = max(len(frame), len(comparison))
         pair_data: list[list[str]] = []
         for index in range(point_count):
             current_exists = index < len(frame)
             comparison_exists = index < len(comparison)
-            current_value = float(frame[y].iloc[index]) if current_exists else None
-            comparison_value = float(comparison[y].iloc[index]) if comparison_exists else None
+            current_value = _safe_number(frame[y].iloc[index]) if current_exists else None
+            comparison_value = (
+                _safe_number(comparison[y].iloc[index])
+                if comparison_exists
+                else None
+            )
             relative_change = (
                 f"{(current_value - comparison_value) / abs(comparison_value):+.2%}"
                 if current_value is not None and comparison_value not in (None, 0)
@@ -150,25 +228,26 @@ def trend_chart(
             f"{label}: %{{customdata[3]}}<br>"
             "Relative change: %{customdata[4]}<extra></extra>"
         )
-        figure.add_trace(
-            go.Scatter(
-                x=list(range(1, len(frame) + 1)),
-                y=frame[y],
-                mode="lines+markers",
-                name="Current",
-                line=dict(color=NAVY, width=3),
-                marker=dict(size=6),
-                customdata=pair_data[: len(frame)],
-                hovertemplate=hover,
+        if current_has_numeric:
+            figure.add_trace(
+                go.Scatter(
+                    x=list(range(1, len(frame) + 1)),
+                    y=frame[y],
+                    mode="lines+markers",
+                    name="Current",
+                    line=dict(color=NAVY, width=3),
+                    marker=dict(size=6),
+                    customdata=pair_data[: len(frame)],
+                    hovertemplate=hover,
+                )
             )
-        )
         figure.add_trace(
             go.Scatter(
                 x=list(range(1, len(comparison) + 1)),
                 y=comparison[y],
                 mode="lines+markers",
                 name=comparison_label,
-                line=dict(color=MUTED, width=2, dash="dot"),
+                line=dict(color=COMPARISON, width=2, dash="dot"),
                 marker=dict(size=5),
                 customdata=pair_data[: len(comparison)],
                 hovertemplate=hover,
@@ -183,7 +262,11 @@ def trend_chart(
                 [
                     _display_period(period),
                     hover_context,
-                    _display_hover_value(float(value), value_format),
+                    (
+                        _display_hover_value(number, value_format)
+                        if (number := _safe_number(value)) is not None
+                        else "Not available"
+                    ),
                 ]
                 for period, value in zip(frame[x], frame[y])
             ]
@@ -207,14 +290,15 @@ def trend_chart(
     figure.update_layout(title=dict(text=label, font=dict(size=16)) if display_title else None)
     figure = _base_layout(figure)
     figure.update_xaxes(automargin=True)
-    figure.update_yaxes(automargin=True)
+    figure.update_yaxes(automargin=True, **_axis_style(value_format))
     if has_comparison:
         tick_indices = list(range(point_count))
+        tick_source = frame if not frame.empty else comparison
+        assert tick_source is not None
         tick_labels = [
-            (
-                f"{_display_axis_period(frame[x].iloc[index]) if index < len(frame) else '—'}<br>"
-                f"{_display_axis_period(comparison[x].iloc[index]) if index < len(comparison) else '—'}"
-            )
+            _display_axis_period(tick_source[x].iloc[index])
+            if index < len(tick_source)
+            else "—"
             for index in tick_indices
         ]
         figure.update_xaxes(
@@ -229,28 +313,8 @@ def trend_chart(
             spikethickness=1,
             spikemode="across",
         )
-        figure.add_annotation(
-            text="Current",
-            x=0,
-            y=-0.16,
-            xref="paper",
-            yref="paper",
-            xanchor="right",
-            showarrow=False,
-            font=dict(color=INK, size=12),
-        )
-        figure.add_annotation(
-            text="Compare",
-            x=0,
-            y=-0.28,
-            xref="paper",
-            yref="paper",
-            xanchor="right",
-            showarrow=False,
-            font=dict(color=MUTED, size=12),
-        )
     if not display_title:
-        figure.update_layout(margin=dict(l=68, r=28, t=22, b=76 if has_comparison else 44))
+        figure.update_layout(margin=dict(l=68, r=28, t=22, b=44))
     return figure
 
 
@@ -266,29 +330,18 @@ def ranked_bar(
 ) -> go.Figure:
     if frame.empty or category not in frame or value not in frame:
         return empty_figure()
+    frame = _numeric_column(frame, value).dropna(subset=[value])
+    if frame.empty:
+        return empty_figure("No numeric evidence is available")
     ordered = frame.sort_values(value, ascending=False)
-    if value_format == "currency":
-        text = [
-            f"${number / 1_000_000:.2f}M"
-            if abs(number) >= 1_000_000
-            else f"${number / 1_000:.2f}K"
-            if abs(number) >= 1_000
-            else f"${number:,.2f}"
-            for number in ordered[value]
-        ]
-    elif value_format == "percent":
-        text = [f"{number:.2%}" for number in ordered[value]]
-    elif value_format == "integer":
-        text = [f"{number:,.0f}" for number in ordered[value]]
-    else:
-        text = [f"{number:,.2f}" for number in ordered[value]]
+    text = [_display_bar_value(float(number), value_format) for number in ordered[value]]
     figure = go.Figure(
         go.Bar(
             x=ordered[value],
             y=ordered[category],
             orientation="h",
             marker=dict(color=color, cornerradius=5),
-            hoverinfo="skip",
+            hovertemplate=f"<b>%{{y}}</b><br>{label}: {_hover_format(value_format, axis='x')}",
             text=text,
             textposition="outside",
             cliponaxis=False,
@@ -303,8 +356,7 @@ def ranked_bar(
         categoryarray=ordered[category].tolist()[::-1],
         automargin=True,
     )
-    height = min(420, max(280, 92 + len(ordered) * 34))
-    figure = _base_layout(figure, height=height)
+    figure = _base_layout(figure)
     longest_label = max((len(str(item)) for item in ordered[category]), default=0)
     figure.update_layout(
         margin=dict(
@@ -314,12 +366,14 @@ def ranked_bar(
             b=32,
         )
     )
-    figure.update_xaxes(automargin=True)
-    maximum = float(ordered[value].max()) if not ordered.empty else 0
-    if maximum > 0:
-        figure.update_xaxes(range=[0, maximum * 1.24])
-    if value_format == "percent":
-        figure.update_xaxes(tickformat=".2%")
+    axis_range = _numeric_range(ordered[value])
+    figure.update_xaxes(
+        automargin=True,
+        range=axis_range,
+        zeroline=bool(axis_range and axis_range[0] <= 0 <= axis_range[1]),
+        zerolinecolor=MUTED,
+        **_axis_style(value_format),
+    )
     return figure
 
 
@@ -332,7 +386,11 @@ def funnel_chart(frame: pd.DataFrame) -> go.Figure:
             y=frame["stage"],
             marker=dict(color=CHART_PALETTE[: len(frame)]),
             customdata=frame["total_conversion"],
-            hoverinfo="skip",
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "Sessions: %{x:,.0f}<br>"
+                "Total conversion: %{customdata:.2%}<extra></extra>"
+            ),
             text=[
                 f"{value:,.0f}<br>{rate:.2%}"
                 for value, rate in zip(frame["sessions"], frame["total_conversion"])
@@ -348,26 +406,230 @@ def funnel_chart(frame: pd.DataFrame) -> go.Figure:
     return figure
 
 
-def grouped_bar(
+def contribution_bar(
     frame: pd.DataFrame,
-    x: str,
-    series: dict[str, str],
+    category: str,
+    value: str,
+    label: str,
     *,
-    title: str,
-    value_format: str = "decimal",
+    value_format: str = "currency",
+    display_title: bool = False,
 ) -> go.Figure:
+    """Render signed accounting contributions around an explicit zero line."""
+    if frame.empty or category not in frame or value not in frame:
+        return empty_figure("No comparison evidence is available")
+    frame = _numeric_column(frame, value).dropna(subset=[value])
     if frame.empty:
-        return empty_figure()
-    figure = go.Figure()
-    for index, (column, label) in enumerate(series.items()):
-        figure.add_trace(
-            go.Bar(
-                x=frame[x],
-                y=frame[column],
-                name=label,
-                marker_color=CHART_PALETTE[index % len(CHART_PALETTE)],
-                hovertemplate=f"%{{x}}<br>{label}: {_hover_format(value_format)}",
-            )
+        return empty_figure("No numeric comparison evidence is available")
+    ordered = frame.assign(_magnitude=frame[value].abs()).sort_values(
+        "_magnitude", ascending=False
+    )
+    colors = [
+        POSITIVE if number > 0 else NEGATIVE if number < 0 else MUTED
+        for number in ordered[value]
+    ]
+    figure = go.Figure(
+        go.Bar(
+            x=ordered[value],
+            y=ordered[category],
+            orientation="h",
+            marker=dict(color=colors, cornerradius=5),
+            customdata=[
+                _display_hover_value(float(number), value_format)
+                for number in ordered[value]
+            ],
+            hovertemplate=f"<b>%{{y}}</b><br>{label}: %{{customdata}}<extra></extra>",
+            text=[_display_hover_value(float(number), value_format) for number in ordered[value]],
+            textposition="outside",
+            cliponaxis=False,
         )
-    figure.update_layout(title=dict(text=title, font=dict(size=16)), barmode="group")
-    return _base_layout(figure)
+    )
+    figure.update_layout(
+        title=dict(text=label, font=dict(size=16)) if display_title else None,
+        showlegend=False,
+    )
+    figure.update_yaxes(
+        categoryorder="array",
+        categoryarray=ordered[category].tolist()[::-1],
+        automargin=True,
+    )
+    figure = _base_layout(figure)
+    figure.update_layout(margin=dict(l=130, r=72, t=44 if display_title else 22, b=32))
+    figure.update_xaxes(
+        range=_numeric_range(ordered[value]),
+        zeroline=True,
+        zerolinecolor=MUTED,
+        zerolinewidth=1,
+        **_axis_style(value_format),
+    )
+    return figure
+
+
+def _optional_display_value(value: object, value_format: str) -> str:
+    number = _safe_number(value)
+    if number is None:
+        return "Not available"
+    return _display_hover_value(number, value_format)
+
+
+def _absolute_change_display(difference: float, value_format: str) -> str:
+    if value_format == "percent":
+        return f"{difference * 100:+.2f} pp"
+    absolute = _display_hover_value(difference, value_format)
+    return f"+{absolute}" if difference > 0 else absolute
+
+
+def _change_display(current: object, comparison: object, value_format: str) -> tuple[str, str]:
+    if current is None or comparison is None or pd.isna(current) or pd.isna(comparison):
+        return "Not available", "Not available"
+    current_number = float(current)
+    comparison_number = float(comparison)
+    difference = current_number - comparison_number
+    absolute = _absolute_change_display(difference, value_format)
+    relative = (
+        f"{difference / abs(comparison_number):+.2%}"
+        if comparison_number != 0
+        else "Not available"
+    )
+    return absolute, relative
+
+
+def comparison_bar(
+    frame: pd.DataFrame,
+    category: str,
+    *,
+    current: str = "current",
+    comparison: str = "comparison",
+    label: str,
+    value_format: str = "decimal",
+    comparison_label: str = "Comparison",
+    current_denominator: str | None = None,
+    comparison_denominator: str | None = None,
+    display_title: bool = False,
+) -> go.Figure:
+    """Compare aligned current/prior segments with exact values and optional sample sizes."""
+    required = {category, current, comparison}
+    if frame.empty or not required.issubset(frame.columns):
+        return empty_figure("No comparison evidence is available")
+    frame = frame.copy()
+    for column in (current, comparison):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+        frame.loc[~np.isfinite(frame[column]), column] = np.nan
+    if frame[[current, comparison]].notna().sum().sum() == 0:
+        return empty_figure("No numeric comparison evidence is available")
+    if "absolute_delta" in frame:
+        frame["absolute_delta"] = pd.to_numeric(
+            frame["absolute_delta"], errors="coerce"
+        )
+        frame.loc[~np.isfinite(frame["absolute_delta"]), "absolute_delta"] = np.nan
+    sort_values = (
+        frame["absolute_delta"].abs()
+        if "absolute_delta" in frame
+        else pd.to_numeric(frame[current], errors="coerce").abs()
+    )
+    ordered = frame.assign(_sort_value=sort_values).sort_values(
+        "_sort_value", ascending=False
+    )
+    customdata: list[list[str]] = []
+    for _, row in ordered.iterrows():
+        absolute, relative = _change_display(row[current], row[comparison], value_format)
+        provided_delta = _safe_number(row.get("absolute_delta"))
+        if absolute == "Not available" and provided_delta is not None:
+            absolute = _absolute_change_display(provided_delta, value_format)
+        current_n = (
+            _optional_display_value(row[current_denominator], "integer")
+            if current_denominator and current_denominator in ordered
+            else "Not provided"
+        )
+        comparison_n = (
+            _optional_display_value(row[comparison_denominator], "integer")
+            if comparison_denominator and comparison_denominator in ordered
+            else "Not provided"
+        )
+        customdata.append(
+            [
+                _optional_display_value(row[current], value_format),
+                _optional_display_value(row[comparison], value_format),
+                absolute,
+                relative,
+                current_n,
+                comparison_n,
+            ]
+        )
+    denominator_lines = ""
+    if current_denominator or comparison_denominator:
+        denominator_lines = (
+            "<br>Current denominator: %{customdata[4]}"
+            "<br>Comparison denominator: %{customdata[5]}"
+        )
+    hover = (
+        "<b>%{y}</b><br>"
+        f"Current {label}: %{{customdata[0]}}<br>"
+        f"{comparison_label} {label}: %{{customdata[1]}}<br>"
+        "Absolute change: %{customdata[2]}<br>"
+        "Relative change: %{customdata[3]}"
+        f"{denominator_lines}<extra></extra>"
+    )
+    figure = go.Figure()
+    figure.add_trace(
+        go.Bar(
+            x=ordered[current],
+            y=ordered[category],
+            orientation="h",
+            name="Current",
+            marker_color=NAVY,
+            customdata=customdata,
+            hovertemplate=hover,
+            text=[
+                ""
+                if _safe_number(value) is None
+                else _display_bar_value(float(value), value_format)
+                for value in ordered[current]
+            ],
+            textposition="outside",
+            cliponaxis=False,
+        )
+    )
+    figure.add_trace(
+        go.Bar(
+            x=ordered[comparison],
+            y=ordered[category],
+            orientation="h",
+            name=comparison_label,
+            marker_color=COMPARISON,
+            customdata=customdata,
+            hovertemplate=hover,
+            text=[
+                ""
+                if _safe_number(value) is None
+                else _display_bar_value(float(value), value_format)
+                for value in ordered[comparison]
+            ],
+            textposition="outside",
+            cliponaxis=False,
+        )
+    )
+    figure.update_layout(
+        title=dict(text=label, font=dict(size=16)) if display_title else None,
+        barmode="group",
+    )
+    figure.update_yaxes(
+        categoryorder="array",
+        categoryarray=ordered[category].tolist()[::-1],
+        automargin=True,
+    )
+    values = pd.concat(
+        [
+            pd.to_numeric(ordered[current], errors="coerce"),
+            pd.to_numeric(ordered[comparison], errors="coerce"),
+        ]
+    )
+    figure = _base_layout(figure)
+    figure.update_layout(margin=dict(l=130, r=32, t=44 if display_title else 30, b=32))
+    figure.update_xaxes(
+        range=_numeric_range(values, label_padding=0.12),
+        zeroline=True,
+        zerolinecolor=MUTED,
+        **_axis_style(value_format),
+    )
+    return figure

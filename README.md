@@ -32,7 +32,8 @@ To rebuild an existing local database from the same CSVs:
 ```
 
 The builder checks for all six files, loads a temporary database, creates analytical indexes, and only then replaces
-the target. The source revision above is the version used for the documented table counts, metric audit, and tests.
+the target. Restart Streamlit after a manual rebuild so the in-process query cache is cleared before the dashboard is
+used again. The source revision above is the version used for the documented table counts, metric audit, and tests.
 
 ## Repository boundary
 
@@ -63,7 +64,7 @@ The top application bar contains four analysis views plus a reference page:
 
 Global filters stay in the left rail when pages change. Each page adds its own controls below them. The reporting window uses safe presets—latest 12, 6, or 3 months, all history, or custom—rather than a month slider. The date window is the upstream filter: traffic, campaign, device, landing-page, product-page, and product options only show values that exist in the selected period and match earlier selections. If a date or upstream-filter change makes a selected value unavailable, the dashboard removes it and shows a brief explanation instead of leaving the report in an accidental empty state.
 
-All filter inputs use one shadcn component system, with consistent labels, borders, height, spacing, and focus behavior. Multi-value controls are searchable; an empty explicit selection means **All**, so a filter group cannot accidentally zero the report. Values inside one group use OR logic, while different filter groups use AND logic. The filter workspace is collapsible and stacks above the report on narrow screens.
+All filter inputs use one shadcn component system, with consistent labels, borders, height, spacing, and focus behavior. Multi-value controls are searchable; an empty explicit selection means **All**, so a filter group cannot accidentally zero the report. Values inside one group use OR logic, while different filter groups use AND logic. The filter workspace stays visible in the desktop left rail and stacks above the report on narrow screens.
 
 ### Visualization standard
 

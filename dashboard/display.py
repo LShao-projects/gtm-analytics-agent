@@ -12,6 +12,7 @@ CURRENCY_COLUMNS = frozenset(
         "gross_revenue",
         "net_revenue",
         "gross_margin",
+        "margin_after_recorded_refunds",
         "cogs",
         "refund_amount",
         "refunded_amount",
@@ -40,7 +41,7 @@ def dataframe_column_config(
         if pd.api.types.is_numeric_dtype(frame[column]):
             options: dict[str, str] = {"alignment": "left"}
             if is_currency_column(column):
-                options["format"] = "$%.2f"
+                options["format"] = "dollar"
             config[label] = st.column_config.NumberColumn(**options)
         else:
             config[label] = st.column_config.TextColumn(alignment="left")

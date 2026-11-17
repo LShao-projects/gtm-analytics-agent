@@ -10,4 +10,5 @@ def test_masked_ad_content_labels_name_source_without_inventing_creative_content
 def test_page_url_labels_are_readable_and_retain_raw_landing_variant():
     assert display_label("/home") == "Homepage (/home)"
     assert display_label("/lander-3") == "Landing page 3 (/lander-3)"
-    assert display_label("/billing-2") == "Optimized billing page (/billing-2)"
+    assert display_label("/billing") == "Observed billing path (/billing)"
+    assert display_label("/billing-2") == "Observed billing path (/billing-2)"

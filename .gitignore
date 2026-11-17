@@ -1,0 +1,40 @@
+# macOS and editor metadata
+.DS_Store
+.idea/
+.vscode/
+
+# Python environments, caches, and test output
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Downloaded source data and generated databases
+tmp/
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated presentation and review artifacts
+output/
+build/
+.build_slides/
+.codex-finalizer/
+
+# Local coding-agent collaboration and internal execution records
+.agents/
+AGENTS.md
+.superpowers/
+docs/superpowers/
+docs/2026-11-15-midpoint-delivery-plan.md
+docs/decisions.md
+presentation_script.md
+

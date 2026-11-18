@@ -12,6 +12,7 @@ import pandas as pd
 import streamlit as st
 import streamlit_shadcn_ui as ui
 
+from dashboard.agent_panel import render_agent_dock
 from dashboard.charts import (
     comparison_bar,
     contribution_bar,
@@ -2726,4 +2727,5 @@ def render_app(path: str | Path, metadata: DatabaseMetadata) -> None:
                         controls,
                         global_scope,
                     )
+    render_agent_dock(path_string, page, period, compare, filters, controls)
 

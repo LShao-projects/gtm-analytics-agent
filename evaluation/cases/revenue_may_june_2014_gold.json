@@ -1,0 +1,51 @@
+{
+  "case_id": "rev-gross-2014-06-vs-05",
+  "split": "development",
+  "status": "FROZEN",
+  "frozen_on": "2026-11-18",
+  "approved_by": "User, 2026-11-18: \"批准冻结\" after reviewing the values computed two independent ways (raw SQL on the tables, and the registered tools).",
+  "question": "Why did gross revenue change from May 2014 to June 2014?",
+  "scope": {"basis": "Gross", "current": "2014-06", "comparison": "2014-05", "filters": "none"},
+  "tolerance": {"dollars": 0.01, "rate": 0.0001},
+  "expected": {
+    "kpis_comparison_then_current": {
+      "sessions": [18061, 17715],
+      "orders": [1368, 1239],
+      "gross_revenue": [88935.27, 80051.25],
+      "refund_amount": [2405.49, 3377.31],
+      "net_revenue": [86529.78, 76673.94],
+      "conversion_rate": [0.07574331432368087, 0.06994072819644369],
+      "aov": [65.01116228070175, 64.60956416464892]
+    },
+    "gross_change": -8884.02,
+    "gross_relative_change": -0.099893,
+    "net_change": -9855.84,
+    "gross_decomposition": {"Sessions": -1633.5, "Order rate": -6727.17, "Gross AOV": -523.35},
+    "net_refund_impact": -971.82,
+    "primary_contributor": "Order rate",
+    "segment_contributions": {
+      "Traffic source": {"Paid Search": -6976.39, "Organic Search": -1325.72, "Direct": -581.91},
+      "UTM source": {"gsearch": -7454.32, "Untracked": -1907.63, "bsearch": 477.93},
+      "Campaign": {"nonbrand": -6704.44, "Untracked": -1907.63, "brand": -271.95},
+      "Device": {"desktop": -7118.44, "mobile": -1765.58},
+      "Session type": {"New": -8788.0, "Repeat": -96.02}
+    },
+    "funnel_step_conversion_comparison_then_current": {
+      "Product detail → Cart": [0.459303, 0.442252],
+      "Cart → Shipping": [0.684671, 0.665754],
+      "Billing → Thank-you": [0.638655, 0.632143]
+    }
+  },
+  "required": [
+    "States the Gross revenue change and its relative change from the evidence",
+    "Names Order rate as the primary contributor",
+    "Locates the decline in Paid Search, nonbrand, desktop and New sessions",
+    "Follows the funnel and points to the cart-related steps",
+    "States as unknown that the dataset has no ad spend, promotion or site-change records"
+  ],
+  "forbidden": [
+    "Stating a real-world cause as fact, for example a budget cut or a site change",
+    "Any number that is not rendered from evidence"
+  ],
+  "allowed_paths": "Any order of registered tools; judged on outcome and evidence, not on the tool sequence"
+}

@@ -75,10 +75,26 @@ def test_masked_values_are_documented_without_claiming_unknown_content():
     assert set(ads["raw_value"]) == {
         "g_ad_1", "g_ad_2", "b_ad_1", "b_ad_2", "social_ad_1", "social_ad_2"
     }
-    assert ads.loc[ads["raw_value"] == "b_ad_1", "known_context"].item() == "Bsearch (Nonbrand campaign)"
+    assert ads.set_index("raw_value")["display_label"].to_dict() == {
+        "g_ad_1": "G Search ad 1",
+        "g_ad_2": "G Search ad 2",
+        "b_ad_1": "B Search ad 1",
+        "b_ad_2": "B Search ad 2",
+        "social_ad_1": "Social Book ad 1",
+        "social_ad_2": "Social Book ad 2",
+    }
+    assert ads.loc[ads["raw_value"] == "b_ad_1", "known_context"].item() == "B Search (Nonbrand campaign)"
     assert not ads["known_context"].str.contains(" · ", regex=False).any()
     assert set(landings["raw_value"]) == {
         "/home", "/lander-1", "/lander-2", "/lander-3", "/lander-4", "/lander-5"
+    }
+    assert landings.set_index("raw_value")["display_label"].to_dict() == {
+        "/home": "Homepage",
+        "/lander-1": "Landing page 1",
+        "/lander-2": "Landing page 2",
+        "/lander-3": "Landing page 3",
+        "/lander-4": "Landing page 4",
+        "/lander-5": "Landing page 5",
     }
     assert landings["known_context"].str.contains("not included").all()
 
@@ -108,16 +124,38 @@ def test_guide_has_three_reference_sections_without_a_free_form_qa_page():
 def test_product_refund_metrics_use_basis_specific_names():
     product_labels = {row[0] for row in METRIC_GUIDES["Products & Refunds"]}
 
-    assert "Purchase-cohort refund rate (Purchase date)" in product_labels
-    assert "Refund event ratio (Refund date)" in product_labels
+    assert "Purchase-Cohort Refund Rate (Purchase Date)" in product_labels
+    assert "Refund Event Ratio (Refund Date)" in product_labels
     assert "Refund rate — Refund date" not in product_labels
 
 
 def test_funnel_guide_names_thank_you_reach_as_sessions_not_orders():
-    funnel_labels = {row[0] for row in METRIC_GUIDES["Website Funnel"]}
+    funnel_rows = {
+        label: (formula, grain, note)
+        for label, formula, grain, note in METRIC_GUIDES["Website Funnel"]
+    }
 
-    assert "Observed thank-you sessions" in funnel_labels
-    assert "Orders" not in funnel_labels
+    assert "Observed Thank-You Sessions" in funnel_rows
+    assert "Orders" not in funnel_rows
+    assert "website_sessions" in funnel_rows["Sessions"][0]
+    assert "website_pageviews" in funnel_rows["Observed Thank-You Sessions"][0]
+    assert "Preceding-stage reach − current-stage reach" in funnel_rows[
+        "Stage-Transition Drop-Off"
+    ][0]
+    assert "same segment" in funnel_rows["Final Observed Conversion by Segment"][0]
+    assert "each device has its own numerator and denominator" in funnel_rows[
+        "Final Observed Conversion by Segment"
+    ][2]
+    assert "stage reach" in funnel_rows["Funnel Detail"][0]
+
+
+def test_guide_preserves_page_specific_detail_tables_and_product_trend():
+    acquisition_labels = {row[0] for row in METRIC_GUIDES["Acquisition"]}
+    product_labels = {row[0] for row in METRIC_GUIDES["Products & Refunds"]}
+
+    assert "Traffic-Source Detail" in acquisition_labels
+    assert "Product-Scoped Monthly Trend" in product_labels
+    assert "Product Detail" in product_labels
 
 
 def test_fact_freshness_inventory_keeps_each_table_cutoff_distinct():

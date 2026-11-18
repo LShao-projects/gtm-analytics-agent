@@ -7,6 +7,8 @@ from dashboard.theme import (
     NAVY,
     NEGATIVE,
     POSITIVE,
+    REPORT_BACKGROUND,
+    REPORT_BORDER,
     WHITE,
 )
 
@@ -26,6 +28,8 @@ def test_theme_text_contrast_meets_wcag_aa():
     assert _contrast_ratio(NAVY, WHITE) >= 4.5
     assert _contrast_ratio(INK, BACKGROUND) >= 4.5
     assert _contrast_ratio(MUTED, WHITE) >= 4.5
+    assert _contrast_ratio(INK, REPORT_BACKGROUND) >= 4.5
+    assert REPORT_BORDER != REPORT_BACKGROUND
 
 
 def test_generic_chart_palette_does_not_use_status_colors():

@@ -250,13 +250,24 @@ def revenue_driver_contributions(
     contributions, not causal effects.
     """
 
-    columns = ["driver", "contribution"]
+    columns = [
+        "driver",
+        "current",
+        "comparison",
+        "value_label",
+        "value_format",
+        "contribution",
+    ]
     if revenue_basis not in {"Gross", "Net"}:
         raise ValueError(f"Unsupported revenue basis: {revenue_basis}")
     if prior is None:
         return pd.DataFrame(
             {
                 "driver": pd.Series(dtype="object"),
+                "current": pd.Series(dtype="float64"),
+                "comparison": pd.Series(dtype="float64"),
+                "value_label": pd.Series(dtype="object"),
+                "value_format": pd.Series(dtype="object"),
                 "contribution": pd.Series(dtype="float64"),
             }
         )
@@ -266,6 +277,11 @@ def revenue_driver_contributions(
         "sessions": "Sessions",
         "conversion_rate": "Order rate",
         "aov": "Gross AOV",
+    }
+    formats = {
+        "sessions": "integer",
+        "conversion_rate": "percent",
+        "aov": "currency",
     }
     current_values = {key: _number(current.get(key, 0)) for key in factor_keys}
     prior_values = {key: _number(prior.get(key, 0)) for key in factor_keys}
@@ -285,6 +301,10 @@ def revenue_driver_contributions(
     rows = [
         {
             "driver": labels[factor],
+            "current": current_values[factor],
+            "comparison": prior_values[factor],
+            "value_label": labels[factor],
+            "value_format": formats[factor],
             "contribution": contributions[factor] / len(orderings),
         }
         for factor in factor_keys
@@ -301,6 +321,10 @@ def revenue_driver_contributions(
         rows.append(
             {
                 "driver": "Order/session timing residual",
+                "current": pd.NA,
+                "comparison": pd.NA,
+                "value_label": "Order/session timing residual",
+                "value_format": "currency",
                 "contribution": timing_residual,
             }
         )
@@ -309,7 +333,11 @@ def revenue_driver_contributions(
         prior_refunds = _number(prior.get("refund_amount", 0))
         rows.append(
             {
-                "driver": "Recorded refunds",
+                "driver": "Recorded-refund impact",
+                "current": current_refunds,
+                "comparison": prior_refunds,
+                "value_label": "Recorded refunds",
+                "value_format": "currency",
                 "contribution": -(current_refunds - prior_refunds),
             }
         )

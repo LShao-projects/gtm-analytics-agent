@@ -462,7 +462,10 @@ def test_revenue_driver_contributions_reconcile_gross_and_net_change():
 
     assert gross["contribution"].sum() == pytest.approx(292.0)
     assert net["contribution"].sum() == pytest.approx(282.0)
-    assert net.set_index("driver").loc["Recorded refunds", "contribution"] == -10.0
+    refunds = net.set_index("driver").loc["Recorded-refund impact"]
+    assert refunds["current"] == 30.0
+    assert refunds["comparison"] == 20.0
+    assert refunds["contribution"] == -10.0
 
 
 def test_revenue_driver_contributions_reconcile_order_session_timing_residual():
@@ -504,7 +507,14 @@ def test_revenue_driver_contributions_missing_prior_returns_stable_typed_schema(
     result = revenue_driver_contributions(current, None)
 
     assert result.empty
-    assert result.columns.tolist() == ["driver", "contribution"]
+    assert result.columns.tolist() == [
+        "driver",
+        "current",
+        "comparison",
+        "value_label",
+        "value_format",
+        "contribution",
+    ]
     assert result["driver"].dtype == "object"
     assert result["contribution"].dtype == "float64"
 

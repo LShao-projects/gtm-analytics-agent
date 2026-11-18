@@ -15,6 +15,8 @@ from dashboard.theme import (
     NAVY,
     NEGATIVE,
     POSITIVE,
+    REPORT_BACKGROUND,
+    REPORT_BORDER,
 )
 
 
@@ -32,6 +34,7 @@ def test_funnel_chart_preserves_business_stage_order():
     figure = funnel_chart(frame)
 
     assert list(figure.data[0].y) == frame["stage"].tolist()
+    assert "<b>CURRENT VALUE</b>" in figure.data[0].hovertemplate
     assert "Sessions: %{x:,.0f}" in figure.data[0].hovertemplate
     assert "Total conversion: %{customdata:.2%}" in figure.data[0].hovertemplate
     assert figure.layout.height <= 330
@@ -45,7 +48,9 @@ def test_ranked_financial_bar_has_exact_hover_and_uses_descending_order():
     figure = ranked_bar(frame, "segment", "revenue", "Revenue", value_format="currency")
 
     assert list(figure.data[0].y) == ["Large", "Small"]
+    assert "<b>CURRENT VALUE</b>" in figure.data[0].hovertemplate
     assert "Revenue: %{x:$,.2f}" in figure.data[0].hovertemplate
+    assert figure.data[0].hovertemplate.count("<extra>") == 1
     assert figure.layout.xaxis.tickformat == "$,.0f"
     assert figure.layout.height == CHART_HEIGHT
     assert figure.data[0].marker.color == NAVY
@@ -74,6 +79,7 @@ def test_single_period_trend_hover_names_scope_and_metric():
     assert figure.data[0].customdata[0][0] == "Oct 2014"
     assert figure.data[0].customdata[0][1] == "All products<br>All item roles<br>All order sizes"
     assert figure.data[0].customdata[0][2] == "$103,905.98"
+    assert "<b>CURRENT VALUE</b>" in figure.data[0].hovertemplate
     assert "Total Revenue" in figure.data[0].hovertemplate
     assert figure.layout.yaxis.tickformat == "$,.0f"
 
@@ -92,8 +98,8 @@ def test_comparison_hover_uses_lines_instead_of_middle_dot_separators():
         comparison_label="Previous period",
     )
 
-    assert "<b>Current</b><br>Period:" in figure.data[0].hovertemplate
-    assert "<b>Previous period</b><br>Period:" in figure.data[0].hovertemplate
+    assert "Current (%{customdata[0]}):" in figure.data[0].hovertemplate
+    assert "Previous period (%{customdata[2]}):" in figure.data[0].hovertemplate
     assert f" {chr(183)} " not in figure.data[0].hovertemplate
 
 
@@ -119,7 +125,13 @@ def test_trend_chart_uses_compact_shared_theme_and_comparison_color():
     assert figure.data[1].name == "Previous period"
     assert figure.data[0].customdata[0][0] == "Jan 2014"
     assert figure.data[0].customdata[0][2] == "Nov 2013"
-    assert "Relative change" in figure.data[0].hovertemplate
+    assert "<b>VALUES BY PERIOD</b>" in figure.data[0].hovertemplate
+    assert "<b>CHANGE</b>" in figure.data[0].hovertemplate
+    assert "Relative: %{customdata[4]}" in figure.data[0].hovertemplate
+    assert figure.layout.hoverlabel.bgcolor == REPORT_BACKGROUND
+    assert figure.layout.hoverlabel.bordercolor == REPORT_BORDER
+    assert figure.layout.hoverlabel.align == "left"
+    assert figure.layout.hoverlabel.font.family.startswith("Inter")
     assert tuple(figure.layout.xaxis.ticktext) == ("Jan 14", "Feb 14")
     assert not figure.layout.annotations
     assert 280 <= figure.layout.height <= 330
@@ -290,6 +302,70 @@ def test_contribution_bar_filters_missing_and_uses_neutral_zero_color():
     assert figure.data[0].customdata[0] == "$0.00"
 
 
+def test_contribution_bar_hover_uses_compact_shared_period_report():
+    frame = pd.DataFrame(
+        {
+            "driver": ["Recorded-refund impact"],
+            "current": [20.0],
+            "comparison": [25.0],
+            "value_label": ["Recorded refunds"],
+            "value_format": ["currency"],
+            "contribution": [5.0],
+        }
+    )
+
+    figure = contribution_bar(
+        frame,
+        "driver",
+        "contribution",
+        "Contribution to net revenue change",
+    )
+
+    assert figure.data[0].customdata[0] == [
+        "$5.00",
+        "$20.00",
+        "$25.00",
+        "-$5.00",
+        "-20.00%",
+        "Recorded refunds",
+    ]
+    assert "DRIVER METRIC LEVEL" in figure.data[0].hovertemplate
+    assert "DRIVER METRIC CHANGE" in figure.data[0].hovertemplate
+    assert "CONTRIBUTION TO REVENUE CHANGE" in figure.data[0].hovertemplate
+    assert "Contribution to net revenue change" in figure.data[0].hovertemplate
+    assert "METRIC FORMULA" not in figure.data[0].hovertemplate
+    assert "INTERPRETATION" not in figure.data[0].hovertemplate
+    assert figure.layout.hovermode == "closest"
+    assert figure.layout.hoverdistance == 20
+
+
+def test_segment_contribution_uses_compact_hover_value():
+    frame = pd.DataFrame(
+        {
+            "segment": ["Desktop"],
+            "current": [125.0],
+            "comparison": [100.0],
+            "absolute_delta": [25.0],
+        }
+    )
+
+    figure = contribution_bar(
+        frame,
+        "segment",
+        "absolute_delta",
+        "Contribution to net revenue change",
+    )
+
+    assert figure.data[0].customdata[0] == [
+        "$25.00",
+        "$125.00",
+        "$100.00",
+        "+$25.00",
+        "+25.00%",
+        "Value",
+    ]
+
+
 def test_trend_chart_treats_missing_values_as_gaps_without_nan_copy():
     frame = pd.DataFrame(
         {"period": ["2014-01", "2014-02"], "revenue": [10.0, pd.NA]}
@@ -337,7 +413,16 @@ def test_comparison_bar_reports_rate_point_change_and_denominators():
     assert list(figure.data[0].y) == ["Desktop", "Mobile"]
     assert figure.data[0].customdata[0][2] == "+1.00 pp"
     assert figure.data[0].customdata[0][4] == "1,000"
-    assert "Current denominator" in figure.data[0].hovertemplate
+    assert "<b>Current: %{y}</b>" in figure.data[0].hovertemplate
+    assert "<b>Previous period: %{y}</b>" in figure.data[1].hovertemplate
+    assert figure.data[0].hovertemplate != figure.data[1].hovertemplate
+    assert "<b>CURRENT VALUE</b>" in figure.data[0].hovertemplate
+    assert "<b>PREVIOUS PERIOD VALUE</b>" in figure.data[1].hovertemplate
+    assert "<b>CHANGE</b>" in figure.data[0].hovertemplate
+    assert "<b>CURRENT DENOMINATOR</b>" in figure.data[0].hovertemplate
+    assert "Sessions: %{customdata[4]}" in figure.data[0].hovertemplate
+    assert "<b>PREVIOUS PERIOD DENOMINATOR</b>" in figure.data[1].hovertemplate
+    assert "Sessions: %{customdata[5]}" in figure.data[1].hovertemplate
     assert f" {chr(183)} " not in figure.data[0].hovertemplate
     assert figure.layout.xaxis.tickformat == ".1%"
     assert figure.data[0].marker.color == NAVY

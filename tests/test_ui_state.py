@@ -92,7 +92,7 @@ def test_report_numbers_use_two_decimal_places_and_integer_counts():
     )
     assert display.loc[0, "Sessions"] == 1234
     assert display.loc[0, "Conversion Rate (%)"] == 7.65
-    assert display.loc[0, "Revenue Per Session"] == 4.88
+    assert display.loc[0, "Revenue per Session"] == 4.88
 
 
 def test_metric_help_explains_business_formula_and_exact_comparison_window():
@@ -341,8 +341,8 @@ def test_complete_month_cutoff_uses_earliest_core_fact_boundary():
 
 
 def test_refund_measure_label_is_explicit_about_date_basis():
-    assert _refund_measure_label("Purchase date") == "Purchase-cohort refund rate"
-    assert _refund_measure_label("Refund date") == "Refund event ratio"
+    assert _refund_measure_label("Purchase date") == "Purchase-Cohort Refund Rate"
+    assert _refund_measure_label("Refund date") == "Refund Event Ratio"
 
 
 def test_product_totals_do_not_report_zero_rate_without_a_denominator():

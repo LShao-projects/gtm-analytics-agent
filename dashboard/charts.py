@@ -16,8 +16,25 @@ from dashboard.theme import (
     NAVY,
     NEGATIVE,
     POSITIVE,
-    WHITE,
+    REPORT_BACKGROUND,
+    REPORT_BORDER,
 )
+
+
+def _report_hover(
+    title: str, sections: tuple[tuple[str, tuple[str, ...]], ...]
+) -> str:
+    """Build a compact, scorecard-style Plotly hover report."""
+    lines = [f"<b>{title}</b>"]
+    for heading, values in sections:
+        lines.extend(
+            (
+                "",
+                f"<span style='color:{MUTED};font-size:10px'><b>{heading.upper()}</b></span>",
+                *values,
+            )
+        )
+    return "<br>".join(lines) + "<extra></extra>"
 
 
 def _base_layout(figure: go.Figure, *, height: int = CHART_HEIGHT) -> go.Figure:
@@ -28,7 +45,16 @@ def _base_layout(figure: go.Figure, *, height: int = CHART_HEIGHT) -> go.Figure:
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(family="Inter, ui-sans-serif, system-ui", color=INK, size=12),
-        hoverlabel=dict(bgcolor=WHITE, font_color=INK, bordercolor=BORDER),
+        hoverlabel=dict(
+            bgcolor=REPORT_BACKGROUND,
+            bordercolor=REPORT_BORDER,
+            align="left",
+            font=dict(
+                family="Inter, ui-sans-serif, system-ui",
+                color=INK,
+                size=12,
+            ),
+        ),
         legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1),
     )
     figure.update_xaxes(
@@ -62,11 +88,11 @@ def empty_figure(
 
 def _hover_format(value_format: str, *, axis: str = "y") -> str:
     return {
-        "currency": f"%{{{axis}:$,.2f}}<extra></extra>",
-        "percent": f"%{{{axis}:.2%}}<extra></extra>",
-        "integer": f"%{{{axis}:,.0f}}<extra></extra>",
-        "decimal": f"%{{{axis}:,.2f}}<extra></extra>",
-    }.get(value_format, f"%{{{axis}}}<extra></extra>")
+        "currency": f"%{{{axis}:$,.2f}}",
+        "percent": f"%{{{axis}:.2%}}",
+        "integer": f"%{{{axis}:,.0f}}",
+        "decimal": f"%{{{axis}:,.2f}}",
+    }.get(value_format, f"%{{{axis}}}")
 
 
 def _axis_style(value_format: str) -> dict[str, str]:
@@ -210,6 +236,9 @@ def trend_chart(
                 if current_value is not None and comparison_value not in (None, 0)
                 else "Not available"
             )
+            absolute_change, _ = _change_display(
+                current_value, comparison_value, value_format
+            )
             pair_data.append(
                 [
                     _display_period(frame[x].iloc[index]) if current_exists else "Not available",
@@ -217,16 +246,27 @@ def trend_chart(
                     _display_period(comparison[x].iloc[index]) if comparison_exists else "Not available",
                     _display_hover_value(comparison_value, value_format) if comparison_value is not None else "Not available",
                     relative_change,
+                    absolute_change,
                 ]
             )
-        hover = (
-            "<b>Current</b><br>"
-            "Period: %{customdata[0]}<br>"
-            f"{label}: %{{customdata[1]}}<br>"
-            f"<b>{comparison_label}</b><br>"
-            "Period: %{customdata[2]}<br>"
-            f"{label}: %{{customdata[3]}}<br>"
-            "Relative change: %{customdata[4]}<extra></extra>"
+        hover = _report_hover(
+            label,
+            (
+                (
+                    "Values by period",
+                    (
+                        "Current (%{customdata[0]}): %{customdata[1]}",
+                        f"{comparison_label} (%{{customdata[2]}}): %{{customdata[3]}}",
+                    ),
+                ),
+                (
+                    "Change",
+                    (
+                        "Absolute: %{customdata[5]}",
+                        "Relative: %{customdata[4]}",
+                    ),
+                ),
+            ),
         )
         if current_has_numeric:
             figure.add_trace(
@@ -256,7 +296,18 @@ def trend_chart(
         figure.update_layout(hovermode="closest", spikedistance=-1)
     else:
         customdata = None
-        hovertemplate = f"%{{x}}<br>{label}: {_hover_format(value_format)}"
+        hovertemplate = _report_hover(
+            label,
+            (
+                (
+                    "Current value",
+                    (
+                        "Period: %{x}",
+                        f"Value: {_hover_format(value_format)}",
+                    ),
+                ),
+            ),
+        )
         if hover_context:
             customdata = [
                 [
@@ -270,10 +321,18 @@ def trend_chart(
                 ]
                 for period, value in zip(frame[x], frame[y])
             ]
-            hovertemplate = (
-                "<b>%{customdata[0]}</b><br>"
-                "%{customdata[1]}<br>"
-                f"{label}: %{{customdata[2]}}<extra></extra>"
+            hovertemplate = _report_hover(
+                label,
+                (
+                    (
+                        "Current value",
+                        (
+                            "Period: %{customdata[0]}",
+                            "%{customdata[1]}",
+                            "Value: %{customdata[2]}",
+                        ),
+                    ),
+                ),
             )
         figure.add_trace(
             go.Scatter(
@@ -341,7 +400,15 @@ def ranked_bar(
             y=ordered[category],
             orientation="h",
             marker=dict(color=color, cornerradius=5),
-            hovertemplate=f"<b>%{{y}}</b><br>{label}: {_hover_format(value_format, axis='x')}",
+            hovertemplate=_report_hover(
+                "%{y}",
+                (
+                    (
+                        "Current value",
+                        (f"{label}: {_hover_format(value_format, axis='x')}",),
+                    ),
+                ),
+            ),
             text=text,
             textposition="outside",
             cliponaxis=False,
@@ -386,10 +453,17 @@ def funnel_chart(frame: pd.DataFrame) -> go.Figure:
             y=frame["stage"],
             marker=dict(color=CHART_PALETTE[: len(frame)]),
             customdata=frame["total_conversion"],
-            hovertemplate=(
-                "<b>%{y}</b><br>"
-                "Sessions: %{x:,.0f}<br>"
-                "Total conversion: %{customdata:.2%}<extra></extra>"
+            hovertemplate=_report_hover(
+                "%{y}",
+                (
+                    (
+                        "Current value",
+                        (
+                            "Sessions: %{x:,.0f}",
+                            "Total conversion: %{customdata:.2%}",
+                        ),
+                    ),
+                ),
             ),
             text=[
                 f"{value:,.0f}<br>{rate:.2%}"
@@ -413,6 +487,8 @@ def contribution_bar(
     label: str,
     *,
     value_format: str = "currency",
+    comparison_label: str = "Comparison",
+    detail_label: str | None = None,
     display_title: bool = False,
 ) -> go.Figure:
     """Render signed accounting contributions around an explicit zero line."""
@@ -428,17 +504,77 @@ def contribution_bar(
         POSITIVE if number > 0 else NEGATIVE if number < 0 else MUTED
         for number in ordered[value]
     ]
+    has_comparison_detail = {"current", "comparison"}.issubset(ordered.columns)
+    if has_comparison_detail:
+        customdata = []
+        for _, row in ordered.iterrows():
+            raw_format = row.get("value_format")
+            row_format = (
+                value_format
+                if raw_format is None or pd.isna(raw_format)
+                else str(raw_format)
+            )
+            raw_label = row.get("value_label")
+            row_label = (
+                detail_label or "Value"
+                if raw_label is None or pd.isna(raw_label)
+                else str(raw_label)
+            )
+            change_value, relative_change = _change_display(
+                row.get("current"), row.get("comparison"), row_format
+            )
+            customdata.append(
+                [
+                    _display_hover_value(float(row[value]), value_format),
+                    _optional_display_value(row.get("current"), row_format),
+                    _optional_display_value(row.get("comparison"), row_format),
+                    change_value,
+                    relative_change,
+                    row_label,
+                ]
+            )
+        hovertemplate = _report_hover(
+            "%{y}",
+            (
+                (
+                    "Driver metric level",
+                    (
+                        "Current (%{customdata[5]}): %{customdata[1]}",
+                        f"{comparison_label} (%{{customdata[5]}}): %{{customdata[2]}}",
+                    ),
+                ),
+                (
+                    "Driver metric change",
+                    (
+                        "Absolute: %{customdata[3]}",
+                        "Relative: %{customdata[4]}",
+                    ),
+                ),
+                (
+                    "Contribution to revenue change",
+                    (f"{label}: %{{customdata[0]}}",),
+                ),
+            ),
+        )
+    else:
+        customdata = [
+            _display_hover_value(float(number), value_format)
+            for number in ordered[value]
+        ]
+        hovertemplate = (
+            _report_hover(
+                "%{y}",
+                (("Contribution", (f"{label}: %{{customdata}}",)),),
+            )
+        )
     figure = go.Figure(
         go.Bar(
             x=ordered[value],
             y=ordered[category],
             orientation="h",
             marker=dict(color=colors, cornerradius=5),
-            customdata=[
-                _display_hover_value(float(number), value_format)
-                for number in ordered[value]
-            ],
-            hovertemplate=f"<b>%{{y}}</b><br>{label}: %{{customdata}}<extra></extra>",
+            customdata=customdata,
+            hovertemplate=hovertemplate,
             text=[_display_hover_value(float(number), value_format) for number in ordered[value]],
             textposition="outside",
             cliponaxis=False,
@@ -447,6 +583,8 @@ def contribution_bar(
     figure.update_layout(
         title=dict(text=label, font=dict(size=16)) if display_title else None,
         showlegend=False,
+        hovermode="closest",
+        hoverdistance=20,
     )
     figure.update_yaxes(
         categoryorder="array",
@@ -556,19 +694,44 @@ def comparison_bar(
                 comparison_n,
             ]
         )
-    denominator_lines = ""
+    current_sections: list[tuple[str, tuple[str, ...]]] = [
+        ("Current value", (f"{label}: %{{customdata[0]}}",)),
+        (comparison_label, (f"{label}: %{{customdata[1]}}",)),
+        (
+            "Change",
+            (
+                "Absolute: %{customdata[2]}",
+                "Relative: %{customdata[3]}",
+            ),
+        ),
+    ]
+    comparison_sections: list[tuple[str, tuple[str, ...]]] = [
+        (f"{comparison_label} value", (f"{label}: %{{customdata[1]}}",)),
+        ("Current", (f"{label}: %{{customdata[0]}}",)),
+        (
+            "Change",
+            (
+                "Absolute: %{customdata[2]}",
+                "Relative: %{customdata[3]}",
+            ),
+        ),
+    ]
     if current_denominator or comparison_denominator:
-        denominator_lines = (
-            "<br>Current denominator: %{customdata[4]}"
-            "<br>Comparison denominator: %{customdata[5]}"
+        current_sections.append(
+            (
+                "Current denominator",
+                ("Sessions: %{customdata[4]}",),
+            )
         )
-    hover = (
-        "<b>%{y}</b><br>"
-        f"Current {label}: %{{customdata[0]}}<br>"
-        f"{comparison_label} {label}: %{{customdata[1]}}<br>"
-        "Absolute change: %{customdata[2]}<br>"
-        "Relative change: %{customdata[3]}"
-        f"{denominator_lines}<extra></extra>"
+        comparison_sections.append(
+            (
+                f"{comparison_label} denominator",
+                ("Sessions: %{customdata[5]}",),
+            )
+        )
+    current_hover = _report_hover("Current: %{y}", tuple(current_sections))
+    comparison_hover = _report_hover(
+        f"{comparison_label}: %{{y}}", tuple(comparison_sections)
     )
     figure = go.Figure()
     figure.add_trace(
@@ -579,7 +742,7 @@ def comparison_bar(
             name="Current",
             marker_color=NAVY,
             customdata=customdata,
-            hovertemplate=hover,
+            hovertemplate=current_hover,
             text=[
                 ""
                 if _safe_number(value) is None
@@ -598,7 +761,7 @@ def comparison_bar(
             name=comparison_label,
             marker_color=COMPARISON,
             customdata=customdata,
-            hovertemplate=hover,
+            hovertemplate=comparison_hover,
             text=[
                 ""
                 if _safe_number(value) is None

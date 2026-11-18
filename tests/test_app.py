@@ -49,7 +49,7 @@ def test_render_top_navigation_defaults_to_first_page():
 def test_overview_metrics_include_comparison_deltas():
     app = AppTest.from_file(APP, default_timeout=30).run()
 
-    assert app.metric[0].label == "Gross revenue"
+    assert app.metric[0].label == "Gross Revenue"
     assert app.metric[0].delta
     assert not app.exception
 
@@ -67,7 +67,7 @@ def test_prior_only_slice_keeps_comparison_evidence_visible():
     app.run()
 
     assert [(metric.label, metric.value) for metric in app.metric[:3]] == [
-        ("Gross revenue", "$0.00"),
+        ("Gross Revenue", "$0.00"),
         ("Orders", "0"),
         ("Sessions", "0"),
     ]
@@ -118,6 +118,9 @@ def test_all_pages_preserve_output_contracts_with_unified_filter_components():
     assert ':first-child .section-title' in page_markup
     assert 'color:#FFFFFF !important; background:var(--navy) !important' in page_markup
     assert ':has(.context-summary)' in page_markup
+    assert ".hoverlayer .hovertext path" in page_markup
+    assert "filter:drop-shadow" in page_markup
+    assert '[data-testid="stPlotlyChart"]:hover svg.main-svg' not in page_markup
     assert ".filter-bottom-spacer { height:3rem; min-height:3rem; }" in page_markup
     assert (
         '.st-key-data_guide_workspace div[data-testid="stButtonGroup"] '
@@ -151,7 +154,61 @@ def test_acquisition_defaults_to_session_volume():
     app.segmented_control(key="top_navigation").set_value("Acquisition").run()
 
     assert app.session_state["acq_metric__value"] == "Sessions"
-    assert any("UTM-source volume" in element.value for element in app.markdown)
+    assert any("UTM Source Volume" in element.value for element in app.markdown)
+    assert any("Traffic-Source Detail" in element.value for element in app.markdown)
+    assert app.dataframe[0].value.columns.tolist() == [
+        "Segment",
+        "Sessions",
+        "Orders",
+        "Revenue",
+        "Gross Margin",
+        "Conversion Rate (%)",
+        "Revenue per Session",
+        "Margin per Session",
+    ]
+    assert not app.exception
+
+
+def test_funnel_detail_preserves_stage_specific_information():
+    app = AppTest.from_file(APP, default_timeout=30).run()
+    app.segmented_control(key="top_navigation").set_value("Website Funnel").run()
+
+    assert app.dataframe[0].value.columns.tolist() == [
+        "Stage",
+        "Transition",
+        "Sessions",
+        "Step Conversion (%)",
+        "Total Conversion (%)",
+        "Drop-Off",
+        "Previous Period Total (%)",
+    ]
+    assert len(app.dataframe[0].value) == 7
+    assert app.dataframe[0].value.iloc[0]["Transition"] == "Starting Stage"
+    assert not app.exception
+
+
+def test_product_detail_preserves_multi_metric_product_information():
+    app = AppTest.from_file(APP, default_timeout=30).run()
+    app.segmented_control(key="top_navigation").set_value("Products & Refunds").run()
+
+    assert app.dataframe[0].value.columns.tolist() == [
+        "Product",
+        "Units",
+        "Revenue",
+        "COGS",
+        "Add-On Units",
+        "Refund Units",
+        "Refund $",
+        "Gross Margin",
+        "Net Revenue",
+        "Refund Rate (%)",
+        "Add-On Share (%)",
+    ]
+    assert len(app.get("plotly_chart")) == 4
+    assert any(
+        "Product-Scoped Monthly Revenue" in element.value
+        for element in app.markdown
+    )
     assert not app.exception
 
 
@@ -162,9 +219,9 @@ def test_overview_without_comparison_does_not_claim_contribution_detail():
     app.run()
 
     section_markup = tuple(element.value for element in app.markdown)
-    assert any("Current-period segment detail" in value for value in section_markup)
-    assert not any(">Contribution detail<" in value for value in section_markup)
-    assert not any("Observed revenue-change contributions" in value for value in section_markup)
+    assert any("Current-Period Segment Detail" in value for value in section_markup)
+    assert not any(">Contribution Detail<" in value for value in section_markup)
+    assert not any("Observed Revenue-Change Contributions" in value for value in section_markup)
     assert not any("Contribution: Traffic source" in value for value in section_markup)
     assert app.dataframe[0].value.columns.tolist() == ["Segment", "Current"]
     assert not app.exception
@@ -174,12 +231,15 @@ def test_refund_date_basis_uses_event_ratio_copy_everywhere():
     app = AppTest.from_file(APP, default_timeout=30).run()
     app.segmented_control(key="top_navigation").set_value("Products & Refunds").run()
     app.session_state["product_basis__value"] = "Refund date"
-    app.session_state["product_metric__value"] = "Refund event ratio"
+    app.session_state["product_metric__value"] = "Refund Event Ratio"
 
     app.run()
 
-    assert app.metric[3].label == "Refund event ratio"
-    assert any("Monthly Refund event ratio" in element.value for element in app.markdown)
+    assert app.metric[3].label == "Refund Event Ratio"
+    assert any(
+        "Product-Scoped Monthly Refund Event Ratio" in element.value
+        for element in app.markdown
+    )
     assert any("event ratio rather than" in element.value for element in app.info)
     assert not app.exception
 

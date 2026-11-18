@@ -45,7 +45,17 @@ from dashboard.options import (
     product_filter_options,
     session_dimension_values,
 )
-from dashboard.theme import BACKGROUND, BORDER, GOLD, INK, MUTED, NAVY, WHITE
+from dashboard.theme import (
+    BACKGROUND,
+    BORDER,
+    GOLD,
+    INK,
+    MUTED,
+    NAVY,
+    REPORT_BACKGROUND,
+    REPORT_BORDER,
+    WHITE,
+)
 
 
 PAGES = ("Executive Overview", "Acquisition", "Website Funnel", "Products & Refunds", "Data Guide")
@@ -79,20 +89,20 @@ PAGE_COPY = {
 
 METRIC_META = {
     "revenue": ("Revenue", "currency"),
-    "gross_revenue": ("Gross revenue", "currency"),
-    "net_revenue": ("Net revenue", "currency"),
+    "gross_revenue": ("Gross Revenue", "currency"),
+    "net_revenue": ("Net Revenue", "currency"),
     "orders": ("Orders", "integer"),
     "sessions": ("Sessions", "integer"),
-    "conversion_rate": ("Conversion rate", "percent"),
-    "aov": ("Average order value", "currency"),
-    "gross_margin": ("Gross margin", "currency"),
-    "margin_after_recorded_refunds": ("Margin after recorded refunds", "currency"),
-    "refund_rate": ("Refund event ratio", "percent"),
-    "revenue_per_session": ("Revenue / session", "currency"),
-    "margin_per_session": ("Margin / session", "currency"),
-    "units": ("Units sold", "integer"),
-    "refunded_amount": ("Refunded amount", "currency"),
-    "addon_unit_share": ("Add-on unit share", "percent"),
+    "conversion_rate": ("Conversion Rate", "percent"),
+    "aov": ("Average Order Value", "currency"),
+    "gross_margin": ("Gross Margin", "currency"),
+    "margin_after_recorded_refunds": ("Margin After Recorded Refunds", "currency"),
+    "refund_rate": ("Refund Event Ratio", "percent"),
+    "revenue_per_session": ("Revenue per Session", "currency"),
+    "margin_per_session": ("Margin per Session", "currency"),
+    "units": ("Units Sold", "integer"),
+    "refunded_amount": ("Refunded Amount", "currency"),
+    "addon_unit_share": ("Add-On Unit Share", "percent"),
 }
 
 CARD_FORMULAS = {
@@ -164,8 +174,8 @@ def inject_css() -> None:
         [data-testid="stTooltipContent"] {
           width:min(31rem, calc(100vw - 1rem)) !important; box-sizing:border-box;
           max-height:none !important; overflow:visible !important;
-          padding:.62rem .7rem .72rem !important; background:#F8FAFD !important;
-          border:1px solid #D9E0EA; border-radius:12px !important;
+          padding:.62rem .7rem .72rem !important; background:__REPORT_BACKGROUND__ !important;
+          border:1px solid __REPORT_BORDER__; border-radius:12px !important;
           box-shadow:0 14px 34px rgba(24,39,75,.16);
         }
         [data-testid="stTooltipContent"] [data-testid="stMarkdownContainer"] h5 {
@@ -200,6 +210,10 @@ def inject_css() -> None:
         }
         [data-testid="stPlotlyChart"] { background:var(--white); border:1px solid var(--line); border-radius:14px; padding:0; overflow:hidden !important; box-sizing:border-box; box-shadow:0 6px 20px rgba(24,39,75,.045); }
         [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) { overflow:hidden !important; }
+        [data-testid="stPlotlyChart"] .hoverlayer .hovertext path {
+          stroke:__REPORT_BORDER__ !important; stroke-width:1px;
+          filter:drop-shadow(0 4px 9px rgba(24,39,75,.14));
+        }
         div[data-testid="stVerticalBlockBorderWrapper"] { border-color:var(--line); background:var(--white); border-radius:14px; box-shadow:0 5px 18px rgba(24,39,75,.04); }
         .stMain div[data-testid="stVerticalBlock"] > div:has(> .st-key-top_nav_shell) {
           position:fixed; top:0; left:0; z-index:1050; width:100vw;
@@ -407,6 +421,8 @@ def inject_css() -> None:
         .replace("__MUTED__", MUTED)
         .replace("__BORDER__", BORDER)
         .replace("__BACKGROUND__", BACKGROUND)
+        .replace("__REPORT_BACKGROUND__", REPORT_BACKGROUND)
+        .replace("__REPORT_BORDER__", REPORT_BORDER)
         .replace("__WHITE__", WHITE),
         unsafe_allow_html=True,
     )
@@ -917,6 +933,16 @@ def _metric_help(
     return "\n\n".join(details)
 
 
+def _title_case(text: str) -> str:
+    """Use readable title case while keeping short connector words lowercase."""
+    titled = text.replace("_", " ").strip().title()
+    for word in ("And", "As", "At", "By", "For", "From", "In", "Of", "On", "Or", "Per", "The", "To", "Vs."):
+        titled = titled.replace(f" {word} ", f" {word.lower()} ")
+    for source, target in (("Utm", "UTM"), ("Cogs", "COGS"), ("Aov", "AOV"), ("Kpi", "KPI"), ("Id", "ID")):
+        titled = titled.replace(source, target)
+    return titled
+
+
 def _format_detail_table(
     frame: pd.DataFrame,
     column_formats: dict[str, str] | None = None,
@@ -944,25 +970,43 @@ def _format_detail_table(
         if column in percent_columns:
             display[column] = (display[column] * 100).round(2)
             suffix = "pp" if column == "absolute_delta" else "%"
-            renamed[column] = f"{column.replace('_', ' ').title()} ({suffix})"
+            renamed[column] = f"{_title_case(column)} ({suffix})"
         elif column in integer_columns:
             display[column] = display[column].round(0).astype("Int64")
-            renamed[column] = column.replace("_", " ").title()
+            renamed[column] = _title_case(column)
         elif pd.api.types.is_numeric_dtype(display[column]):
             display[column] = display[column].round(2)
-            renamed[column] = column.replace("_", " ").title()
+            renamed[column] = _title_case(column)
         else:
-            renamed[column] = column.replace("_", " ").title()
+            renamed[column] = _title_case(column)
     return display.rename(columns=renamed)
 
 
 def _render_detail_table(
     frame: pd.DataFrame,
     column_formats: dict[str, str] | None = None,
+    column_labels: dict[str, str] | None = None,
+    column_widths: dict[str, int] | None = None,
 ) -> None:
     column_formats = column_formats or {}
+    column_labels = column_labels or {}
+    column_widths = column_widths or {}
     display = _format_detail_table(frame, column_formats)
     display_names = {source: target for source, target in zip(frame.columns, display.columns)}
+    display = display.rename(
+        columns={
+            display_names[source]: label
+            for source, label in column_labels.items()
+            if source in display_names
+        }
+    )
+    display_names.update(
+        {
+            source: label
+            for source, label in column_labels.items()
+            if source in display_names
+        }
+    )
     column_config = dataframe_column_config(frame, display_names)
     for source, value_format in column_formats.items():
         if source not in frame or source not in display_names:
@@ -971,6 +1015,24 @@ def _render_detail_table(
             column_config[display_names[source]] = st.column_config.NumberColumn(
                 alignment="left",
                 format="dollar",
+                width="small",
+            )
+    for source, width in column_widths.items():
+        if source not in frame or source not in display_names:
+            continue
+        label = display_names[source]
+        if pd.api.types.is_numeric_dtype(frame[source]):
+            options: dict[str, object] = {
+                "alignment": "left",
+                "width": width,
+            }
+            if column_formats.get(source) == "currency":
+                options["format"] = "dollar"
+            column_config[label] = st.column_config.NumberColumn(**options)
+        else:
+            column_config[label] = st.column_config.TextColumn(
+                alignment="left",
+                width=width,
             )
     st.dataframe(
         display,
@@ -978,38 +1040,6 @@ def _render_detail_table(
         width="stretch",
         hide_index=True,
     )
-
-
-def _comparison_detail_rows(
-    frame: pd.DataFrame,
-    category: str,
-    measure: str,
-    value_format: str,
-    *,
-    detail_type: str,
-) -> pd.DataFrame:
-    rows: list[dict[str, object]] = []
-    for _, row in frame.iterrows():
-        current = row.get("current")
-        comparison = row.get("comparison")
-        rows.append(
-            {
-                "detail_type": detail_type,
-                "segment": row.get(category),
-                "measure": measure,
-                "current_value": _format_exact_value(current, value_format),
-                "comparison_value": _format_exact_value(comparison, value_format),
-                "change": _delta(current, comparison, value_format)
-                or "Not available",
-                "current_denominator": _format_exact_value(
-                    row.get("current_denominator"), "integer"
-                ),
-                "comparison_denominator": _format_exact_value(
-                    row.get("comparison_denominator"), "integer"
-                ),
-            }
-        )
-    return pd.DataFrame(rows)
 
 
 def _fact_freshness(label: str, timestamp: str | None) -> str | None:
@@ -1036,9 +1066,9 @@ def _freshness_scope(
 
 def _refund_measure_label(date_basis: str) -> str:
     if date_basis == "Purchase date":
-        return "Purchase-cohort refund rate"
+        return "Purchase-Cohort Refund Rate"
     if date_basis == "Refund date":
-        return "Refund event ratio"
+        return "Refund Event Ratio"
     raise ValueError(f"Unsupported refund basis: {date_basis}")
 
 
@@ -1503,7 +1533,7 @@ def _render_overview_filters(compare: str) -> dict:
     basis = _ui_select("Revenue basis", ("Gross", "Net"), key="overview_basis")
     primary = _ui_select(
         "Primary KPI",
-        ("Revenue", "Orders", "Sessions", "Order rate", "Average order value", "Gross margin", "Refund event ratio"),
+        ("Revenue", "Orders", "Sessions", "Order Rate", "Average Order Value", "Gross Margin", "Refund Event Ratio"),
         key="overview_primary",
     )
     dimension_role = (
@@ -1545,7 +1575,7 @@ def _render_acquisition_filters(options: dict) -> dict:
     )
     metric = _ui_select(
         "Metric",
-        ("Sessions", "Orders", "Order rate", "Revenue per session", "Gross margin per session"),
+        ("Sessions", "Orders", "Order Rate", "Revenue per Session", "Gross Margin per Session"),
         key="acq_metric",
         default="Sessions",
     )
@@ -1659,11 +1689,11 @@ def _render_product_filters(options: dict) -> dict:
         "Metric",
         (
             "Revenue",
-            "Units sold",
-            "Gross margin",
+            "Units Sold",
+            "Gross Margin",
             refund_measure_label,
-            "Refunded amount",
-            "Add-on unit share",
+            "Refunded Amount",
+            "Add-On Unit Share",
         ),
         key="product_metric",
     )
@@ -1766,9 +1796,9 @@ def render_overview(
         {"revenue_basis": controls["basis"]},
         {
             "aov": "Gross AOV",
-            "conversion_rate": "Order rate",
-            "margin_after_recorded_refunds": "Margin after refunds",
-            "refund_rate": "Refund event ratio",
+            "conversion_rate": "Order Rate",
+            "margin_after_recorded_refunds": "Margin After Refunds",
+            "refund_rate": "Refund Event Ratio",
         },
     )
 
@@ -1776,19 +1806,19 @@ def render_overview(
         "Revenue": "revenue",
         "Orders": "orders",
         "Sessions": "sessions",
-        "Order rate": "conversion_rate",
-        "Average order value": "aov",
-        "Gross margin": "gross_margin",
-        "Refund event ratio": "refund_rate",
+        "Order Rate": "conversion_rate",
+        "Average Order Value": "aov",
+        "Gross Margin": "gross_margin",
+        "Refund Event Ratio": "refund_rate",
     }
     metric = primary_map[controls["primary"]]
     label, value_format = METRIC_META[metric]
     if metric == "revenue":
-        label = f"{controls['basis']} revenue"
+        label = f"{controls['basis']} Revenue"
     elif metric == "aov":
-        label = "Average order value (gross)"
+        label = "Average Order Value (Gross)"
     elif metric == "conversion_rate":
-        label = "Order rate"
+        label = "Order Rate"
     trend = cached_overview_trend(
         path, filters, period, controls["grain"], controls["basis"]
     )
@@ -1802,7 +1832,7 @@ def render_overview(
     trend_chips = (label, f"Current: {period.label}")
     if prior_period:
         trend_chips += (f"{compare}: {prior_period.label}",)
-    _section("Performance trend", chips=trend_chips)
+    _section("Performance Trend", chips=trend_chips)
     st.plotly_chart(
         trend_chart(
             trend,
@@ -1840,14 +1870,21 @@ def render_overview(
     left, right = st.columns(2)
     with left:
         driver_title = (
-            "Observed revenue-change contributions"
+            "Observed Revenue-Change Contributions"
             if prior_period is not None
-            else "Revenue-change decomposition"
+            else "Revenue-Change Decomposition"
         )
         driver_chips = (
-            (f"{controls['basis']} revenue", "Accounting decomposition", "Not causal")
+            (
+                f"{controls['basis']} Revenue",
+                "Includes recorded refunds"
+                if controls["basis"] == "Net"
+                else "Recorded refunds excluded",
+                "Accounting decomposition",
+                "Not causal",
+            )
             if prior_period is not None
-            else (f"{controls['basis']} revenue", "Comparison required")
+            else (f"{controls['basis']} Revenue", "Comparison required")
         )
         _section(
             driver_title,
@@ -1858,22 +1895,34 @@ def render_overview(
             prior,
             revenue_basis=controls["basis"],
         )
+        if not driver_frame.empty:
+            driver_frame = driver_frame.copy()
+            driver_frame["driver"] = driver_frame["driver"].map(_title_case)
+            driver_frame["value_label"] = driver_frame["value_label"].map(
+                _title_case
+            )
         if prior_period is None:
             st.info("Choose a comparison period to decompose the observed revenue change.")
         else:
+            if controls["basis"] == "Gross":
+                st.caption(
+                    "Recorded-refund impact is excluded from this Gross revenue decomposition. "
+                    "Select Net under Revenue basis to include it."
+                )
             st.plotly_chart(
                 contribution_bar(
                     driver_frame,
                     "driver",
                     "contribution",
-                    f"{controls['basis']} revenue change",
+                    f"Contribution to {controls['basis'].lower()} revenue change",
                     value_format="currency",
+                    comparison_label=compare,
                 ),
                 width="stretch",
                 key="overview_revenue_contributions",
             )
     with right:
-        segment_label = f"{controls['basis']} revenue"
+        segment_label = f"{controls['basis']} Revenue"
         if prior_period is None:
             _section(
                 f"Current {segment_label.lower()} by {dimension.lower()}",
@@ -1896,7 +1945,7 @@ def render_overview(
             )
         else:
             _section(
-                f"Revenue-change contribution by {dimension.lower()}",
+                f"Revenue-Change Contribution by {_title_case(dimension)}",
                 chips=(segment_label, f"vs. {prior_period.label}", "Not causal"),
             )
             segment_detail = segment_contributions(
@@ -1909,8 +1958,10 @@ def render_overview(
                     segment_detail,
                     "segment",
                     "absolute_delta",
-                    f"{segment_label} change",
+                    f"Contribution to {segment_label.lower()} change",
                     value_format="currency",
+                    comparison_label=compare,
+                    detail_label=segment_label,
                 ),
                 width="stretch",
                 key="overview_segment_contributions",
@@ -1918,12 +1969,12 @@ def render_overview(
 
     if prior_period is None:
         _section(
-            "Current-period segment detail",
+            "Current-Period Segment Detail",
             f"Current {segment_label.lower()} by {dimension.lower()}; no change contribution is calculated without a comparison period.",
         )
     else:
         _section(
-            "Contribution detail",
+            "Contribution Detail",
             "Positive and negative values reconcile to the observed period-over-period change; they do not establish causality.",
         )
     _render_detail_table(
@@ -1976,14 +2027,19 @@ def render_acquisition(
     )
     sources = cached_acquisition(
         path, scoped, period, "UTM source", controls["landings"]
-    )
+    ).copy()
+    sources["segment"] = sources["segment"].map(format_filter_option)
     prior_sources = (
         cached_acquisition(
             path, scoped, prior_period, "UTM source", controls["landings"]
-        )
+        ).copy()
         if prior_period
         else None
     )
+    if prior_sources is not None:
+        prior_sources["segment"] = prior_sources["segment"].map(
+            format_filter_option
+        )
     source_totals = _acquisition_totals(sources)
     prior_totals = (
         _acquisition_totals(prior_sources) if prior_sources is not None else None
@@ -2002,23 +2058,23 @@ def render_acquisition(
         period,
         prior_period,
         "acquisition",
-        label_overrides={"conversion_rate": "Order rate"},
+        label_overrides={"conversion_rate": "Order Rate"},
     )
 
     metric_map = {
         "Sessions": ("sessions", "integer"),
         "Orders": ("orders", "integer"),
-        "Order rate": ("conversion_rate", "percent"),
-        "Revenue per session": ("revenue_per_session", "currency"),
-        "Gross margin per session": ("margin_per_session", "currency"),
+        "Order Rate": ("conversion_rate", "percent"),
+        "Revenue per Session": ("revenue_per_session", "currency"),
+        "Gross Margin per Session": ("margin_per_session", "currency"),
     }
     metric, value_format = metric_map[controls["metric"]]
-    chart_type = "volume" if metric in {"sessions", "orders"} else "efficiency"
+    chart_type = "Volume" if metric in {"sessions", "orders"} else "Efficiency"
     dimensions = (
-        ("UTM source", "UTM-source"),
+        ("UTM source", "UTM Source"),
         ("Campaign", "Campaign"),
         ("Device", "Device"),
-        ("Landing page", "Landing-page"),
+        ("Landing page", "Landing Page"),
     )
     frames: dict[str, tuple[pd.DataFrame, pd.DataFrame | None]] = {
         "UTM source": (sources, prior_sources)
@@ -2034,7 +2090,7 @@ def render_acquisition(
             if prior_period
             else None
         )
-        if dimension in {"Campaign", "Device", "Landing page"}:
+        if dimension in {"UTM source", "Campaign", "Device", "Landing page"}:
             current_frame["segment"] = current_frame["segment"].map(
                 format_filter_option
             )
@@ -2044,7 +2100,6 @@ def render_acquisition(
                 )
         frames[dimension] = (current_frame, prior_frame)
 
-    detail_frames: list[pd.DataFrame] = []
     left, right = st.columns(2)
     chart_columns = (left, right)
     for index, (dimension, title_prefix) in enumerate(dimensions):
@@ -2059,7 +2114,7 @@ def render_acquisition(
                 else ("Current period only",)
             )
             _section(f"{title_prefix} {chart_type}", chips=chips)
-            detail = _render_comparison_or_current_bar(
+            _render_comparison_or_current_bar(
                 current_frame,
                 prior_frame,
                 category="segment",
@@ -2075,21 +2130,24 @@ def render_acquisition(
                     else None
                 ),
             )
-            detail = detail.copy()
-            detail.insert(0, "dimension", dimension)
-            detail_frames.append(detail)
-    _section(
-        "Acquisition detail",
-        "Revenue per session is an on-site yield metric, not ROAS; the dataset contains no advertising spend.",
+    traffic_sources = cached_acquisition(
+        path, scoped, period, "Traffic source", controls["landings"]
     )
-    detail_format = {
-        "current": value_format,
-        "comparison": value_format,
-        "absolute_delta": value_format,
-    }
+    _section(
+        "Traffic-Source Detail",
+        "Current-period metrics by derived traffic source; this complements the single metric selected in the charts.",
+    )
     _render_detail_table(
-        pd.concat(detail_frames, ignore_index=True),
-        detail_format,
+        traffic_sources,
+        {
+            "sessions": "integer",
+            "orders": "integer",
+            "revenue": "currency",
+            "gross_margin": "currency",
+            "conversion_rate": "percent",
+            "revenue_per_session": "currency",
+            "margin_per_session": "currency",
+        },
     )
 
 
@@ -2165,19 +2223,19 @@ def render_funnel(
         period,
         prior_period,
         "funnel",
-        label_overrides={"orders": "Observed thank-you sessions"},
+        label_overrides={"orders": "Observed Thank-You Sessions", "conversion_rate": "Conversion Rate"},
     )
     left, right = st.columns([1.35, 1])
     with left:
         _section(
-            "Ordered funnel",
+            "Ordered Funnel",
             chips=("Current session cohort", f"{period.label}", "Observed paths"),
         )
         funnel_frame = current if current_has_evidence else pd.DataFrame()
         st.plotly_chart(funnel_chart(funnel_frame), width="stretch", key="funnel_main")
     with right:
         _section(
-            "Stage-transition drop-off",
+            "Stage-Transition Drop-Off",
             chips=(
                 "Sessions lost between adjacent stages",
                 (f"vs. {prior_period.label}" if prior_period else "Current period only"),
@@ -2189,7 +2247,7 @@ def render_funnel(
             if prior is not None and not prior.empty
             else None
         )
-        drop_detail = _render_comparison_or_current_bar(
+        _render_comparison_or_current_bar(
             drop,
             prior_drop,
             category="transition",
@@ -2201,7 +2259,7 @@ def render_funnel(
             denominator=None,
         )
     _section(
-        f"Final observed conversion by {controls['compare_by'].lower()}",
+        f"Final Observed Conversion by {_title_case(controls['compare_by'])}",
         "Thank-you-page reach is the final observed event; this is not an experiment result.",
     )
     breakdown = cached_funnel_breakdown(
@@ -2228,82 +2286,52 @@ def render_funnel(
             prior_breakdown["segment"] = prior_breakdown["segment"].map(
                 format_filter_option
             )
-    breakdown_detail = _render_comparison_or_current_bar(
+    _render_comparison_or_current_bar(
         breakdown,
         prior_breakdown,
         category="segment",
         metric="conversion_rate",
-        label="Final observed conversion",
+        label="Final Observed Conversion",
         value_format="percent",
         compare=compare,
         key="funnel_breakdown",
         denominator="sessions",
     )
     detail = current.copy()
+    detail["transition"] = detail["transition"].fillna("Starting Stage")
     if prior is not None and not prior.empty:
         detail = detail.merge(
-            prior[["stage", "sessions", "total_conversion"]],
+            prior[["stage", "total_conversion"]],
             on="stage",
             how="left",
             suffixes=("", "_comparison"),
         )
-    else:
-        detail["sessions_comparison"] = pd.NA
-        detail["total_conversion_comparison"] = pd.NA
-    stage_reach = detail[
-        ["stage", "sessions", "sessions_comparison"]
-    ].rename(
-        columns={
-            "sessions": "current",
-            "sessions_comparison": "comparison",
-        }
-    )
-    stage_conversion = detail[
-        ["stage", "total_conversion", "total_conversion_comparison"]
-    ].rename(
-        columns={
-            "total_conversion": "current",
-            "total_conversion_comparison": "comparison",
-        }
-    )
-    funnel_detail = pd.concat(
-        [
-            _comparison_detail_rows(
-                stage_reach,
-                "stage",
-                "Stage reach",
-                "integer",
-                detail_type="Stage",
-            ),
-            _comparison_detail_rows(
-                stage_conversion,
-                "stage",
-                "Total conversion",
-                "percent",
-                detail_type="Stage",
-            ),
-            _comparison_detail_rows(
-                drop_detail,
-                "transition",
-                "Sessions lost",
-                "integer",
-                detail_type="Transition",
-            ),
-            _comparison_detail_rows(
-                breakdown_detail,
-                "segment",
-                "Final observed conversion",
-                "percent",
-                detail_type=controls["compare_by"],
-            ),
-        ],
-        ignore_index=True,
-    )
     _section(
-        "Funnel detail",
-        "Stage, transition, and segment comparisons use explicit values and denominators.",
+        "Funnel Detail",
+        "One row per ordered stage with current reach, adjacent-step conversion, total conversion, and drop-off.",
     )
-    _render_detail_table(funnel_detail)
+    comparison_label = (
+        {"Previous period": "Previous Period Total (%)", "Previous year": "Previous Year Total (%)"}.get(
+            compare,
+            "Comparison Total (%)",
+        )
+    )
+    _render_detail_table(
+        detail,
+        column_labels={
+            "drop_off": "Drop-Off",
+            "total_conversion_comparison": comparison_label,
+        },
+        column_widths={
+            "stage": 104,
+            "transition": 188,
+            "sessions": 88,
+            "step_conversion": 116,
+            "total_conversion": 116,
+            "drop_off": 88,
+            "total_conversion_comparison": 148,
+        },
+    )
 
 
 def _product_totals(frame: pd.DataFrame) -> dict[str, float]:
@@ -2381,16 +2409,16 @@ def render_products(
 
     metric_map = {
         "Revenue": ("revenue", "currency"),
-        "Units sold": ("units", "integer"),
-        "Gross margin": ("gross_margin", "currency"),
+        "Units Sold": ("units", "integer"),
+        "Gross Margin": ("gross_margin", "currency"),
         refund_rate_label: ("refund_rate", "percent"),
-        "Refunded amount": ("refunded_amount", "currency"),
-        "Add-on unit share": ("addon_unit_share", "percent"),
+        "Refunded Amount": ("refunded_amount", "currency"),
+        "Add-On Unit Share": ("addon_unit_share", "percent"),
     }
     metric, value_format = metric_map[controls["metric"]]
     if metric != "refunded_amount":
         exposure_metric = "refunded_amount"
-        exposure_label = "Refunded amount"
+        exposure_label = "Refunded Amount"
         exposure_format = "currency"
         exposure_denominator = None
     else:
@@ -2401,13 +2429,13 @@ def render_products(
     performance_column, refunds_column = st.columns(2)
     with performance_column:
         _section(
-            "Product performance",
+            "Product Performance",
             chips=(
                 controls["metric"],
                 (f"vs. {prior_period.label}" if prior_period else "Current period only"),
             ),
         )
-        performance_detail = _render_comparison_or_current_bar(
+        _render_comparison_or_current_bar(
             current,
             prior,
             category="product",
@@ -2422,13 +2450,13 @@ def render_products(
         )
     with refunds_column:
         _section(
-            "Refund exposure",
+            "Refund Exposure",
             chips=(
                 exposure_label,
                 (f"vs. {prior_period.label}" if prior_period else "Current period only"),
             ),
         )
-        exposure_detail = _render_comparison_or_current_bar(
+        _render_comparison_or_current_bar(
             current,
             prior,
             category="product",
@@ -2439,10 +2467,15 @@ def render_products(
             key="product_refunds",
             denominator=exposure_denominator,
         )
-    basket_column, trend_column = st.columns([0.36, 0.64], gap="large")
+    trend_scope = (
+        controls["product_scope"],
+        controls["role_scope"],
+        controls["size_scope"],
+    )
+    basket_column, trend_column = st.columns([0.36, 0.64])
     with basket_column:
         _section(
-            "Basket mix",
+            "Basket Mix",
             chips=(
                 "Orders by basket size",
                 (f"vs. {prior_period.label}" if prior_period else "Current period only"),
@@ -2461,7 +2494,7 @@ def render_products(
             if prior_period
             else None
         )
-        basket_detail = _render_comparison_or_current_bar(
+        _render_comparison_or_current_bar(
             basket,
             prior_basket,
             category="order_size",
@@ -2473,11 +2506,6 @@ def render_products(
             denominator=None,
         )
     with trend_column:
-        trend_scope = (
-            controls["product_scope"],
-            controls["role_scope"],
-            controls["size_scope"],
-        )
         trend_context = "<br>".join(trend_scope)
         trend_basis = (
             f"Refund basis: {controls['basis']}"
@@ -2485,7 +2513,7 @@ def render_products(
             else "Sales basis: Item purchase date"
         )
         _section(
-            f"Monthly {controls['metric']}",
+            f"Product-Scoped Monthly {controls['metric']}",
             chips=(trend_basis, *trend_scope),
         )
         trend = cached_product_trend(
@@ -2537,40 +2565,47 @@ def render_products(
             key="product_trend",
         )
     _section(
-        "Product detail",
-        "Add-on unit share is selected add-on units divided by selected units; it is not an order-level attach rate.",
+        "Product Detail",
+        "One row per product with current-period sales, margin, refund, and add-on metrics.",
     )
-    product_measure = (
-        refund_rate_label if metric == "refund_rate" else controls["metric"]
+    _render_detail_table(
+        current,
+        {
+            "units": "integer",
+            "addon_units": "integer",
+            "units_refunded": "integer",
+            "revenue": "currency",
+            "cogs": "currency",
+            "refunded_amount": "currency",
+            "gross_margin": "currency",
+            "net_revenue": "currency",
+            "refund_rate": "percent",
+            "addon_unit_share": "percent",
+        },
+        {
+            "cogs": "COGS",
+            "addon_units": "Add-On Units",
+            "units_refunded": "Refund Units",
+            "refunded_amount": "Refund $",
+            "gross_margin": "Gross Margin",
+            "net_revenue": "Net Revenue",
+            "refund_rate": "Refund Rate (%)",
+            "addon_unit_share": "Add-On Share (%)",
+        },
+        {
+            "product": 176,
+            "units": 58,
+            "revenue": 86,
+            "cogs": 86,
+            "addon_units": 78,
+            "units_refunded": 78,
+            "refunded_amount": 86,
+            "gross_margin": 100,
+            "net_revenue": 100,
+            "refund_rate": 86,
+            "addon_unit_share": 90,
+        },
     )
-    detail_parts = [
-        _comparison_detail_rows(
-            performance_detail,
-            "product",
-            product_measure,
-            value_format,
-            detail_type="Product performance",
-        )
-    ]
-    detail_parts.append(
-        _comparison_detail_rows(
-            exposure_detail,
-            "product",
-            exposure_label,
-            exposure_format,
-            detail_type="Refund exposure",
-        )
-    )
-    detail_parts.append(
-        _comparison_detail_rows(
-            basket_detail,
-            "order_size",
-            "Orders",
-            "integer",
-            detail_type="Basket mix",
-        )
-    )
-    _render_detail_table(pd.concat(detail_parts, ignore_index=True))
 
 
 def render_top_navigation() -> str:

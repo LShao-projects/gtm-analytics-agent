@@ -37,6 +37,10 @@ def _signed_money(value: float) -> str:
     return f"{'+' if value > 0 else ''}{_format(value, 'currency')}"
 
 
+format_value = _format
+signed_money = _signed_money
+
+
 @dataclass(frozen=True)
 class _Contributor:
     label: str

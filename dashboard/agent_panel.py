@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from itertools import groupby
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 from dashboard.filters import comparison_period
+from dashboard.labels import display_label
 from dashboard.models import DatePeriod, FilterSpec
 from investigation import (
     Budgets,
@@ -25,6 +27,7 @@ from investigation import (
     investigate,
     trace_to_json,
 )
+from investigation.facts import format_value, signed_money
 from investigation.models import Claim
 from investigation.providers import ClassifyDecision, FinishDecision, ToolDecision
 
@@ -37,6 +40,11 @@ LEVEL_LABELS = {
     "observed_contribution": "Observed contribution",
     "hypothesis": "Hypothesis (untested)",
     "unknown": "Unknown",
+}
+# Where a status has a code-rendered body, say who wrote its words; other statuses have none.
+_PROVENANCE = {
+    "report": "Facts are rendered by code from evidence; only hypotheses and unknowns are model text.",
+    "definition": "Definitions are quoted by code from the Data Guide; the model only chose which ones.",
 }
 
 # The thread's scroll box is a column-reverse flex container, so a short thread sits at the
@@ -124,29 +132,77 @@ def claim_rows(result: InvestigationResult) -> list[dict[str, str]]:
     ]
 
 
+# Evidence measure -> (display name, value format); anything not listed is a dollar amount.
+MEASURES = {
+    "revenue": "Revenue",
+    "gross_revenue": "Gross Revenue",
+    "net_revenue": "Net Revenue",
+    "orders": ("Orders", "integer"),
+    "sessions": ("Sessions", "integer"),
+    "conversion_rate": ("Order Rate", "percent"),
+    "aov": "Gross AOV",
+    "gross_margin": "Gross Margin",
+    "margin_after_recorded_refunds": "Margin After Recorded Refunds",
+    "refund_amount": "Refund Amount",
+    "refund_rate": ("Refund Event Ratio", "percent"),
+}
+
+
+def _measure(key: str) -> tuple[str, str]:
+    name = MEASURES.get(key, key.replace("_", " ").title())
+    return name if isinstance(name, tuple) else (name, "currency")
+
+
+def _move(comparison, current, value_format: str) -> str:
+    if comparison is None and current is None:
+        return ""
+    return f"{format_value(comparison, value_format)} to {format_value(current, value_format)}"
+
+
 def evidence_frames(result: InvestigationResult) -> list[tuple[str, pd.DataFrame]]:
+    """One narrow, formatted table per evidence record, readable in the drawer."""
     frames = []
     for record in result.evidence:
         payload = record.as_dict()
-        title = f"{record.evidence_id}: {record.tool_name}"
+        title = f"{record.evidence_id} {record.tool_name.replace('_', ' ').capitalize()}"
         if record.tool_name == "revenue_summary":
             current, comparison = payload["current"], payload["comparison"] or {}
-            frame = pd.DataFrame(
-                {
-                    "Measure": list(current),
-                    "Current": list(current.values()),
-                    "Comparison": [comparison.get(key) for key in current],
-                }
-            )
+            rows = []
+            for key, value in current.items():
+                name, value_format = _measure(key)
+                rows.append(
+                    (
+                        name,
+                        format_value(comparison.get(key), value_format) if comparison else "",
+                        format_value(value, value_format),
+                    )
+                )
+            frame = pd.DataFrame(rows, columns=["Measure", "Comparison", "Current"])
         elif record.tool_name == "revenue_decomposition":
-            frame = pd.DataFrame(payload["drivers"])[
-                ["driver", "comparison", "current", "contribution"]
-            ]
+            frame = pd.DataFrame(
+                [
+                    (
+                        row["driver"],
+                        _move(row["comparison"], row["current"], row["value_format"]),
+                        signed_money(row["contribution"]),
+                    )
+                    for row in payload["drivers"]
+                ],
+                columns=["Driver", "Comparison to Current", "Contribution"],
+            )
         else:
             title += f" ({payload['dimension']})"
-            frame = pd.DataFrame(payload["segments"])[
-                ["segment", "comparison", "current", "absolute_delta"]
-            ]
+            frame = pd.DataFrame(
+                [
+                    (
+                        display_label(row["segment"]),
+                        _move(row["comparison"], row["current"], "currency"),
+                        signed_money(row["absolute_delta"]),
+                    )
+                    for row in payload["segments"]
+                ],
+                columns=["Segment", "Comparison to Current", "Change"],
+            )
         frames.append((title, frame))
     return frames
 
@@ -209,15 +265,51 @@ def _plain(text: str) -> str:
     return text.replace("$", "\\$")
 
 
-def _render_result(result: InvestigationResult, position: int) -> None:
+def _cited(row: dict[str, str]) -> str:
+    return f" :gray-badge[{row['Evidence']}]" if row["Evidence"] else ""
+
+
+def _render_claims(result: InvestigationResult) -> None:
+    """Show report claims grouped by level in a fixed order, whatever order the model listed them."""
+    order = {label: index for index, label in enumerate(LEVEL_LABELS.values())}
+    rows = sorted(
+        claim_rows(result),
+        key=lambda row: (order.get(row["Type"], len(order)), row["Type"]),
+    )
+    for label, group in groupby(rows, key=lambda row: row["Type"]):
+        st.caption(label)
+        if label == LEVEL_LABELS["verified_fact"]:
+            st.markdown(
+                "\n\n".join(f"**{_plain(row['Statement'])}**{_cited(row)}" for row in group)
+            )
+        else:
+            st.markdown(
+                "\n".join(f"- {_plain(row['Statement'])}{_cited(row)}" for row in group)
+            )
+
+
+def _render_definitions(result: InvestigationResult) -> None:
+    """Show each Data Guide entry as a title and labeled parts, quoted as the Guide wrote them."""
+    for index, definition in enumerate(result.definitions):
+        if index:
+            st.divider()
+        st.markdown(f"**{_plain(definition.name)}** :gray-badge[{_plain(definition.context)}]")
+        for label, value in definition.fields:
+            st.markdown(f":gray[{label}]  \n{_plain(value)}")
+        st.caption(f"Source: {definition.source}")
+
+
+def _render_answer(result: InvestigationResult) -> None:
     if result.status == "clarification":
         st.info(_plain(result.clarification.question))
     elif result.status == "refusal":
-        st.warning(_plain(result.refusal))
+        st.warning(_plain(result.refusal_reason))
+        st.caption("I can")
+        st.markdown(
+            "\n".join(f"- {_plain(item[:1].upper() + item[1:])}" for item in result.refusal_scope)
+        )
     elif result.status == "definition":
-        for definition in result.definitions:
-            st.markdown(_plain(definition.text))
-            st.caption(f"Source: {definition.source}")
+        _render_definitions(result)
     elif result.status == "failure":
         st.error(
             f"The investigation stopped without a report ({result.stop_reason}). "
@@ -226,24 +318,21 @@ def _render_result(result: InvestigationResult, position: int) -> None:
         for issue in result.issues:
             st.caption(_plain(f"{issue.code}: {issue.message}"))
     else:
-        for row in claim_rows(result):
-            st.markdown(f"**{row['Type']}.** {_plain(row['Statement'])}")
-            if row["Evidence"]:
-                st.caption(f"Evidence {row['Evidence']}")
-        if result.stop_reason != "supported_conclusion":
-            st.caption(f"Stopped early: {result.stop_reason.replace('_', ' ')}.")
-    provenance = (
-        "Definitions are quoted by code from the Data Guide; the model only chose which ones."
-        if result.status == "definition"
-        else "Facts are rendered by code from evidence; only hypotheses and unknowns are model text."
-    )
-    st.caption(f"Model: {result.model or 'none'}. Stop reason: {result.stop_reason}. {provenance}")
-    if result.evidence:
-        with st.expander(f"Evidence ({len(result.evidence)} records)"):
+        _render_claims(result)
+
+
+def _render_details(result: InvestigationResult, position: int) -> None:
+    """Evidence and trace stay collapsed, with run metadata inside, so the answer stays uncluttered."""
+    count = len(result.evidence)
+    if count:
+        with st.expander(f"Evidence ({count} record{'' if count == 1 else 's'})"):
             for title, frame in evidence_frames(result):
                 st.markdown(f"**{title}**")
-                st.dataframe(frame, hide_index=True, width="stretch")
+                st.table(frame.map(_plain).set_index(frame.columns[0]))
     with st.expander("Investigation trace"):
+        st.caption(f"Model: {result.model or 'none'}. Stop reason: {result.stop_reason}.")
+        if result.status in _PROVENANCE:
+            st.caption(_PROVENANCE[result.status])
         st.dataframe(trace_frame(result), hide_index=True, width="stretch")
         st.download_button(
             "Download trace (JSON)",
@@ -252,6 +341,11 @@ def _render_result(result: InvestigationResult, position: int) -> None:
             mime="application/json",
             key=f"agent_trace_download_{position}",
         )
+
+
+def _render_result(result: InvestigationResult, position: int) -> None:
+    _render_answer(result)
+    _render_details(result, position)
 
 
 def _toggle_drawer() -> None:

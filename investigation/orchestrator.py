@@ -35,26 +35,37 @@ from investigation.tools import InvestigationTools, ToolInputError, UnsupportedT
 from investigation.validator import ValidationIssue, validate_report
 
 
-SUPPORTED_SCOPE = (
-    "I can investigate month-over-month Gross or Net revenue changes: confirm the change, "
+SUPPORTED_ITEMS = (
+    "investigate month-over-month Gross or Net revenue changes: confirm the change, "
     "decompose it into Sessions, Order rate and Gross AOV (plus recorded refunds for Net), "
-    "and locate it by traffic source, campaign, device or session type. I can also quote "
-    "the Data Guide definition of a dashboard metric, traffic source, campaign or table."
+    "and locate it by traffic source, campaign, device or session type",
+    "quote the Data Guide definition of a dashboard metric, traffic source, campaign or table",
+)
+SUPPORTED_SCOPE = f"I can {SUPPORTED_ITEMS[0]}. I can also {SUPPORTED_ITEMS[1]}."
+DEFINITION_MISS_REASON = "The Data Guide has no definition for that."
+DEFINITION_ITEMS = (
+    "the metrics on each dashboard page",
+    "the derived traffic-source and campaign labels",
+    "the six source tables",
 )
 DEFINITION_MISS = (
-    "The Data Guide has no definition for that. It defines the metrics on each dashboard page, "
+    f"{DEFINITION_MISS_REASON} It defines the metrics on each dashboard page, "
     "the derived traffic-source and campaign labels, and the six source tables. "
     "Ask about one of those, or ask me to investigate a month-over-month revenue change."
 )
-REFUSALS = {
+REFUSAL_REASONS = {
     "unsupported_capability": (
         "This request needs a capability the investigation tools do not have, such as "
-        "significance testing, forecasting or taking an action. " + SUPPORTED_SCOPE
+        "significance testing, forecasting or taking an action."
     ),
     "unanswerable_from_data": (
         "The dataset cannot show real-world causes such as competitor pricing, ad budgets, "
-        "promotions or site changes, so I will not claim one. " + SUPPORTED_SCOPE
+        "promotions or site changes, so I will not claim one."
     ),
+}
+REFUSALS = {
+    question_class: f"{reason} {SUPPORTED_SCOPE}"
+    for question_class, reason in REFUSAL_REASONS.items()
 }
 STOP_TEXT = {
     "timeout": "The investigation reached its time limit.",
@@ -100,6 +111,8 @@ class InvestigationResult:
     sentences: tuple[str, ...] = ()
     clarification: ClarificationRequest | None = None
     refusal: str | None = None
+    refusal_reason: str | None = None
+    refusal_scope: tuple[str, ...] = ()
     issues: tuple[ValidationIssue, ...] = ()
     model: str = ""
     definitions: tuple[Definition, ...] = ()
@@ -220,6 +233,8 @@ def investigate(
             "no_matching_definition",
             "metric_definition",
             refusal=DEFINITION_MISS,
+            refusal_reason=DEFINITION_MISS_REASON,
+            refusal_scope=(*DEFINITION_ITEMS, SUPPORTED_ITEMS[0]),
         )
 
     # 1. classify
@@ -234,7 +249,14 @@ def investigate(
     add("classify", question_class)
     if question_class in REFUSALS:
         add("refusal", question_class)
-        return result("refusal", question_class, question_class, refusal=REFUSALS[question_class])
+        return result(
+            "refusal",
+            question_class,
+            question_class,
+            refusal=REFUSALS[question_class],
+            refusal_reason=REFUSAL_REASONS[question_class],
+            refusal_scope=SUPPORTED_ITEMS,
+        )
     if question_class == "metric_definition":
         return define(context.page if context else None)
     if question_class != "supported_investigation":

@@ -32,6 +32,33 @@ def test_every_data_guide_metric_is_quoted_from_its_source():
         assert page in definition.source
 
 
+def test_every_entry_carries_its_labeled_parts_quoted_verbatim_from_the_guide():
+    for page, display, formula, grain, note in _metric_rows():
+        assert CATALOG[f"{page} / {display}"].fields == (
+            ("Formula or Definition", formula),
+            ("Grain", grain),
+            ("Interpretation Note", note),
+        )
+    for name, rule in TRAFFIC_SOURCE_RULES.items():
+        assert CATALOG[f"Traffic source / {name}"].fields == (("Rule", rule),)
+    for name, meaning in CAMPAIGN_DEFINITIONS.items():
+        assert CATALOG[f"Campaign / {name}"].fields == (("Meaning", meaning),)
+    for name, spec in TABLE_SPECS.items():
+        assert CATALOG[f"Table / {name}"].fields == (
+            ("Description", spec["description"]),
+            ("Grain", spec["grain"]),
+            ("Primary Key", spec["primary_key"]),
+        )
+
+
+def test_every_entry_has_a_name_a_context_and_no_blank_part():
+    for topic, definition in CATALOG.items():
+        assert definition.topic == topic
+        assert definition.name.strip() and definition.context.strip()
+        assert definition.fields
+        assert all(label.strip() and value.strip() for label, value in definition.fields)
+
+
 def test_the_same_metric_name_on_different_pages_stays_distinct():
     sessions = [label for label in topic_labels() if label.endswith(" / Sessions")]
 

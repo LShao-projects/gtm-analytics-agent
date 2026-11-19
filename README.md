@@ -26,14 +26,25 @@ python3 -m venv .venv
 .venv/bin/streamlit run app.py
 ```
 
-Open the printed URL (normally `http://localhost:8501`) in a window at least 1280 px wide; narrower windows show the agent below the page.
+Open the printed URL (normally `http://localhost:8501`) in a window at least 1280 px wide; narrower windows show the agent below the page. The dashboard works at this point; the agent needs a model, below.
 
-**Agent model.** The panel offers two options in its settings:
+## Connect the agent to Gemini
 
-- **Gemini (live):** uses `gemini-3-flash-preview` on Vertex AI. Run `gcloud auth application-default login` first. Optional environment variables: `GOOGLE_CLOUD_PROJECT`, `GTM_AGENT_MODEL`.
-- **Scripted replay (no model call):** a fixed sequence of tool calls for offline demos. It runs the real tools but ignores the question wording.
+The agent calls `gemini-3-flash-preview` on Vertex AI (location `global`). No API key is used or stored; it authenticates with your own Google Cloud credentials.
 
-No secrets are stored in the project; see `.env.example`.
+1. Have a Google Cloud project with billing enabled and the Vertex AI API turned on (`gcloud services enable aiplatform.googleapis.com`).
+2. Install the [gcloud CLI](https://cloud.google.com/sdk/docs/install) and sign in so the app can find credentials:
+
+   ```bash
+   gcloud auth application-default login
+   gcloud auth application-default set-quota-project YOUR_PROJECT_ID
+   ```
+
+3. Restart Streamlit. In the agent panel, open the settings icon and keep **Gemini (live)** selected, then ask a question.
+
+The project is taken from `GOOGLE_CLOUD_PROJECT` if set, otherwise from the credentials above. `GTM_AGENT_MODEL` overrides the model name. A live investigation costs a fraction of a cent.
+
+**No Google Cloud access?** Choose **Scripted replay (no model call)** in the same settings. It runs the real tools on the page's current period and filters, but follows a fixed sequence and ignores the question wording, so it only demonstrates the pipeline.
 
 ## Test
 

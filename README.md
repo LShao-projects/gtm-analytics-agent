@@ -1,4 +1,4 @@
-# Maven Revenue Investigation Agent
+# Autonomous Marketing & Revenue Investigation Agent
 
 A Streamlit revenue dashboard for the Maven Fuzzy Factory e-commerce dataset, plus a bounded AI agent that investigates month-over-month revenue changes. The agent reports observed drivers and contributions, not causes.
 

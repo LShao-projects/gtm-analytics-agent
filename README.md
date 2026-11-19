@@ -72,4 +72,7 @@ Tests cover the metric layer, dashboard behavior, the agent's tools, validator, 
 - Data: [Maven Analytics toy store database](https://mavenanalytics.io/data-playground/toy-store-e-commerce-database), via the public copy above (pinned commit).
 - Libraries: Streamlit, streamlit-shadcn-ui, pandas, Plotly, google-genai, pytest.
 - Model: Google Gemini through Vertex AI.
-- AI coding assistants were used during development.
+
+## AI assistance
+
+AI coding assistants were used for implementation, tests, and documentation of this project.

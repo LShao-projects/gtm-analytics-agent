@@ -57,3 +57,10 @@ def test_build_database_loads_all_six_csvs_and_replaces_atomically(tmp_path):
     with sqlite3.connect(output) as connection:
         assert connection.execute("SELECT SUM(price_usd) FROM orders").fetchone()[0] == 49.99
         assert connection.execute("SELECT utm_source IS NULL FROM website_sessions").fetchone()[0] == 1
+        stat_tables = {
+            name
+            for (name,) in connection.execute(
+                "SELECT name FROM sqlite_master WHERE name LIKE 'sqlite_stat%'"
+            )
+        }
+        assert "sqlite_stat1" in stat_tables and "sqlite_stat4" not in stat_tables

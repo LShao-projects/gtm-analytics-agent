@@ -109,6 +109,13 @@ def build_database(source_dir: str | Path, output_path: str | Path, *, force: bo
             for statement in INDEXES:
                 connection.execute(statement)
             connection.execute("ANALYZE")
+            # SQLite builds with STAT4 store extra samples that make the planner choose a very
+            # slow plan for the funnel query (minutes instead of about a second); keep stat1 only.
+            has_stat4 = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name = 'sqlite_stat4'"
+            ).fetchone()
+            if has_stat4:
+                connection.execute("DROP TABLE sqlite_stat4")
         os.replace(temporary, output)
     except Exception:
         temporary.unlink(missing_ok=True)

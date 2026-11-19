@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 import streamlit_shadcn_ui as ui
 
-from dashboard.agent_panel import render_agent_dock
+from dashboard.agent_panel import PANEL_CSS, render_agent_panel
 from dashboard.charts import (
     comparison_bar,
     contribution_bar,
@@ -142,7 +142,7 @@ def inject_css() -> None:
         """
         <style>
         :root { --navy:__NAVY__; --gold:__GOLD__; --ink:__INK__; --muted:__MUTED__; --line:__BORDER__; --soft:__BACKGROUND__; --white:__WHITE__; }
-        :root { --topbar-height:4rem; }
+        :root { --topbar-height:4rem; --agent-width:clamp(21rem, 28vw, 27.5rem); --agent-rail-width:3.25rem; }
         [data-testid="stHeader"], [data-testid="stSidebar"] { display:none; }
         .stApp { background: var(--soft); color: var(--ink); }
         .block-container { max-width:1600px; padding:var(--topbar-height) 1.25rem 2.5rem; }
@@ -236,25 +236,32 @@ def inject_css() -> None:
         }
         .st-key-app_workspace {
           margin:-.56rem -1.25rem -2.5rem !important;
+          width:calc(100% + 2.5rem) !important; max-width:none !important;
+          display:grid !important; grid-template-columns:minmax(0, 1fr) var(--agent-width); gap:0 !important;
         }
-        .st-key-app_workspace > div[data-testid="stVerticalBlock"] { gap:0 !important; }
-        .st-key-app_workspace div[data-testid="stHorizontalBlock"]:has(.page-title) > div[data-testid="stColumn"]:first-child {
-          position:sticky; top:var(--topbar-height); align-self:flex-start;
-          height:calc(100vh - var(--topbar-height)); min-height:0; overflow:hidden;
-          background:#F3F3FA; border-right:0; padding:1.25rem 1rem 2rem 1.75rem;
-          box-sizing:border-box;
+        .st-key-app_workspace > * { min-width:0; }
+        .st-key-dashboard_main { padding:1rem 1.25rem 2.5rem 1.75rem; box-sizing:border-box; }
+        .st-key-app_workspace div:has([class*="st-key-agent_panel"]) { height:100%; }
+        .st-key-app_workspace > div:has([class*="st-key-agent_panel"]) {
+          position:sticky; top:var(--topbar-height); align-self:start;
+          height:calc(100vh - var(--topbar-height));
         }
-        .st-key-app_workspace div[data-testid="stHorizontalBlock"]:has(.page-title) > div[data-testid="stColumn"]:first-child > div[data-testid="stVerticalBlock"] {
-          height:100%; min-height:0; padding-right:.75rem; box-sizing:border-box;
-          overflow-y:auto; overflow-x:hidden; scrollbar-width:thin; scrollbar-gutter:stable;
-          overscroll-behavior:contain;
+        @media (min-width: 1280px) {
+          .st-key-app_workspace:has(.st-key-agent_panel_collapsed) {
+            grid-template-columns:minmax(0, 1fr) var(--agent-rail-width);
+          }
         }
-        .st-key-app_workspace div[data-testid="stHorizontalBlock"]:has(.page-title) > div[data-testid="stColumn"]:first-child > div[data-testid="stVerticalBlock"] > div[data-testid="stElementContainer"]:first-child .section-title {
-          margin-top:0;
+        .st-key-filter_bar { margin-bottom:.45rem; }
+        .st-key-filter_global, .st-key-filter_page {
+          background:var(--white) !important; border-color:var(--line) !important;
+          border-radius:14px !important; box-shadow:0 5px 18px rgba(24,39,75,.05) !important;
         }
-        .filter-bottom-spacer { height:3rem; min-height:3rem; }
-        .st-key-app_workspace div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child:has(.page-title) {
-          padding:1.25rem 1.25rem 2.5rem 1rem;
+        .st-key-filter_bar [data-testid="stVerticalBlock"] { gap:.5rem; }
+        .st-key-filter_bar [data-testid="stMarkdownContainer"] { margin-bottom:0; }
+        .st-key-filter_bar .section-title { margin:0; font-size:.92rem; line-height:1.3; }
+        .st-key-filter_bar .section-note { margin:0; line-height:1.35; }
+        .st-key-filter_bar [data-testid="stElementContainer"]:has(.section-title) + [data-testid="stElementContainer"]:has(.section-note) {
+          margin-top:-.3rem;
         }
         div[data-testid="stDataFrame"] { border:1px solid var(--line); border-radius:12px; overflow:hidden; box-shadow:0 4px 14px rgba(24,39,75,.035); }
         .st-key-data_guide_workspace {
@@ -349,6 +356,25 @@ def inject_css() -> None:
         [data-testid="stSelectbox"] label, [data-testid="stSlider"] label { color:#475467; font-size:.76rem; font-weight:680; }
         [data-testid="stSelectSlider"] label { color:#475467; font-size:.76rem; font-weight:680; }
         hr { margin:.35rem 0 .6rem !important; border-color:var(--line) !important; }
+        @media (max-width: 1279px) {
+          .st-key-app_workspace { grid-template-columns:minmax(0, 1fr); }
+          .st-key-app_workspace > div:has([class*="st-key-agent_panel"]) {
+            position:relative; height:min(80vh, 42rem);
+          }
+          .st-key-app_workspace > div:has(.st-key-agent_panel_collapsed) { height:auto; }
+          .st-key-app_workspace [class*="st-key-agent_panel"] { border-left:0; border-top:1px solid var(--line); }
+          .st-key-app_workspace .st-key-agent_panel_collapsed {
+            flex-direction:row; align-items:center; padding:.45rem .75rem;
+          }
+          .st-key-app_workspace .agent-rail-label { writing-mode:horizontal-tb; }
+          .st-key-app_workspace .st-key-agent_collapse, .st-key-app_workspace .st-key-agent_expand {
+            left:50%; top:0; transform:translate(-50%, -50%);
+          }
+          .st-key-app_workspace .st-key-agent_collapse button[kind="tertiary"],
+          .st-key-app_workspace .st-key-agent_expand button[kind="tertiary"] { width:56px; height:20px; min-height:20px; }
+          .st-key-app_workspace .st-key-agent_collapse span[role="img"],
+          .st-key-app_workspace .st-key-agent_expand span[role="img"] { transform:rotate(90deg); }
+        }
         @media (max-width: 1100px) {
           .brand-name { font-size:.88rem; }
           .st-key-top_nav_shell div[data-testid="stSegmentedControl"] button,
@@ -360,7 +386,7 @@ def inject_css() -> None:
           .block-container { padding:var(--topbar-height) .8rem 1.5rem; }
           .page-title { font-size:1.5rem !important; }
           :root { --topbar-height:3.15rem; }
-          .st-key-app_workspace { margin:-.56rem -.8rem -1.5rem !important; }
+          .st-key-app_workspace { margin:-.56rem -.8rem -1.5rem !important; width:calc(100% + 1.6rem) !important; }
           .st-key-top_nav_shell {
             width:100vw !important; min-width:100vw !important; max-width:none !important;
             padding:0 .75rem !important; margin:0 !important;
@@ -382,30 +408,25 @@ def inject_css() -> None:
           .st-key-top_nav_shell div[data-testid="stButtonGroup"] [role="radio"] {
             flex:0 0 auto !important; min-height:2.2rem; padding:.38rem .16rem; font-size:.62rem; white-space:nowrap;
           }
-          .st-key-app_workspace div[data-testid="stHorizontalBlock"]:has(.page-title) > div[data-testid="stColumn"]:first-child {
-            position:sticky; top:var(--topbar-height); align-self:flex-start;
-            flex:0 0 11.9rem !important; width:11.9rem !important;
-            height:calc(100vh - var(--topbar-height)); overflow:hidden;
-            padding-left:.75rem; padding-right:.75rem;
+          .st-key-dashboard_main { padding:.9rem .8rem 1.5rem; }
+          .st-key-filter_bar div[data-testid="stHorizontalBlock"] { flex-wrap:wrap !important; }
+          .st-key-filter_bar div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            flex:1 1 calc(50% - .5rem) !important; min-width:calc(50% - .5rem) !important;
           }
-          .st-key-app_workspace div[data-testid="stHorizontalBlock"]:has(.page-title) {
-            flex-wrap:nowrap !important; align-items:flex-start !important;
+          .st-key-filter_bar div[data-testid="stColumn"]:not(:has([data-testid="stElementContainer"])) {
+            display:none;
           }
-          .st-key-app_workspace div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child:has(.page-title) {
-            flex:1 1 0 !important; width:auto !important; min-width:0 !important;
-            padding:1.25rem .8rem 1.5rem .7rem;
-          }
-          .st-key-app_workspace div[data-testid="stHorizontalBlock"]:not(:has(.page-title)):has([data-testid="stMetric"]) {
+          .st-key-app_workspace div[data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) {
             flex-wrap:wrap !important;
           }
-          .st-key-app_workspace div[data-testid="stHorizontalBlock"]:not(:has(.page-title)):has([data-testid="stMetric"]) > div[data-testid="stColumn"] {
+          .st-key-app_workspace div[data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) > div[data-testid="stColumn"] {
             flex:1 1 calc(50% - .55rem) !important; width:calc(50% - .55rem) !important;
             min-width:calc(50% - .55rem) !important; max-width:calc(50% - .55rem) !important;
           }
-          .st-key-app_workspace div[data-testid="stHorizontalBlock"]:not(:has(.page-title)):has([data-testid="stPlotlyChart"]) {
+          .st-key-app_workspace div[data-testid="stHorizontalBlock"]:has([data-testid="stPlotlyChart"]) {
             flex-wrap:wrap !important;
           }
-          .st-key-app_workspace div[data-testid="stHorizontalBlock"]:not(:has(.page-title)):has([data-testid="stPlotlyChart"]) > div[data-testid="stColumn"] {
+          .st-key-app_workspace div[data-testid="stHorizontalBlock"]:has([data-testid="stPlotlyChart"]) > div[data-testid="stColumn"] {
             flex:1 1 100% !important; width:100% !important;
           }
           [data-testid="stMetric"] { padding:.62rem .68rem; }
@@ -424,7 +445,8 @@ def inject_css() -> None:
         .replace("__BACKGROUND__", BACKGROUND)
         .replace("__REPORT_BACKGROUND__", REPORT_BACKGROUND)
         .replace("__REPORT_BORDER__", REPORT_BORDER)
-        .replace("__WHITE__", WHITE),
+        .replace("__WHITE__", WHITE)
+        + PANEL_CSS,
         unsafe_allow_html=True,
     )
 
@@ -1279,19 +1301,10 @@ def _context_chips(
     )
 
 
-def _page_header(
-    page: str,
-    period: DatePeriod,
-    prior_period: DatePeriod | None,
-    compare: str,
-    global_scope: tuple[str, ...],
-    page_scope: tuple[str, ...],
-    freshness: tuple[str, ...],
-) -> None:
+def _page_title(page: str) -> None:
     title, subtitle = PAGE_COPY[page]
     st.markdown(f"<h1 class='page-title'>{title}</h1>", unsafe_allow_html=True)
     st.markdown(f"<div class='page-subtitle'>{subtitle}</div>", unsafe_allow_html=True)
-    _context_chips(period, prior_period, compare, global_scope, page_scope, freshness)
 
 
 def _section(title: str, note: str = "", *, chips: tuple[str, ...] = ()) -> None:
@@ -1364,10 +1377,25 @@ def _optional_float(value: object) -> float | None:
     return None if value is None or pd.isna(value) else float(value)
 
 
+# Column weights shared by every row of the filter cards so their controls line up; the first
+# column is wider because it holds the Reporting window.
+FILTER_GRID = (1.15, 1, 1, 1)
+
+
 def _global_filters(
     path: str, metadata: DatabaseMetadata
 ) -> tuple[DatePeriod, str, FilterSpec, tuple[str, ...]]:
-    _section("Global filters", "Shared across every analysis workspace")
+    title_column, _, _, reset_column = st.columns(FILTER_GRID, vertical_alignment="center")
+    with title_column:
+        _section("Global filters", "Shared across every analysis workspace")
+    with reset_column:
+        ui.button(
+            "Reset analysis filters",
+            key="reset_analysis_filters",
+            variant="outline",
+            on_click=_reset_analysis_filters,
+            width="stretch",
+        )
     months = _months(metadata)
     if not months:
         if not metadata.session_min or not metadata.session_max:
@@ -1377,52 +1405,54 @@ def _global_filters(
                 "No shared reporting month satisfies the core-fact month-coverage heuristic."
             )
         st.stop()
-    window = _ui_select(
-        "Reporting window",
-        (
-            "Latest 12 covered months",
-            "Latest 6 covered months",
-            "Latest 3 covered months",
-            "All covered history",
-            "Custom",
-        ),
-        key="global_date_window",
-    )
+    window_column, compare_column, start_column, end_column = st.columns(FILTER_GRID)
+    with window_column:
+        window = _ui_select(
+            "Reporting window",
+            (
+                "Latest 12 covered months",
+                "Latest 6 covered months",
+                "Latest 3 covered months",
+                "All covered history",
+                "Custom",
+            ),
+            key="global_date_window",
+        )
     partial = _excluded_partial_month(metadata)
-    if partial:
-        st.caption(f"Incomplete source months excluded from reporting: {partial}.")
     if window == "All covered history":
         chosen = _reporting_window_months(months, window)
     elif window == "Custom":
-        custom_start = _ui_select(
-            "Start month",
-            months,
-            default=months[max(0, len(months) - 12)],
-            format_func=lambda value: datetime.strptime(value, "%Y-%m").strftime("%b %Y"),
-            key="global_custom_start",
-        )
-        custom_end = _ui_select(
-            "End month",
-            months,
-            default=months[-1],
-            format_func=lambda value: datetime.strptime(value, "%Y-%m").strftime("%b %Y"),
-            key="global_custom_end",
-        )
+        with start_column:
+            custom_start = _ui_select(
+                "Start month",
+                months,
+                default=months[max(0, len(months) - 12)],
+                format_func=lambda value: datetime.strptime(value, "%Y-%m").strftime("%b %Y"),
+                key="global_custom_start",
+            )
+        with end_column:
+            custom_end = _ui_select(
+                "End month",
+                months,
+                default=months[-1],
+                format_func=lambda value: datetime.strptime(value, "%Y-%m").strftime("%b %Y"),
+                key="global_custom_end",
+            )
         chosen = _reporting_window_months(months, window, custom_start, custom_end)
     else:
         chosen = _reporting_window_months(months, window)
     period = DatePeriod.from_months(chosen[0], chosen[1])
     compare_options = _available_comparison_modes(period, months[0])
-    compare = _ui_select(
-        "Compare with",
-        compare_options,
-        key="global_compare",
-    )
-    if compare_options == ("None",):
-        st.caption(
-            "Comparison is unavailable because it would precede the covered-month heuristic boundary."
+    with compare_column:
+        compare = _ui_select(
+            "Compare with",
+            compare_options,
+            key="global_compare",
         )
     option_periods = _comparison_option_periods(period, compare)
+    source_column, campaign_column, device_column, session_type_column = st.columns(
+        FILTER_GRID
+    )
     source_options = _merge_options(
         *(
             cached_session_dimension_values(
@@ -1431,12 +1461,13 @@ def _global_filters(
             for option_period in option_periods
         )
     )
-    sources = checkbox_group(
-        "Traffic source",
-        source_options,
-        "global_source",
-        all_label="All traffic sources",
-    )
+    with source_column:
+        sources = checkbox_group(
+            "Traffic source",
+            source_options,
+            "global_source",
+            all_label="All traffic sources",
+        )
     effective_sources = _effective_filter_values(source_options, sources)
     source_filters = FilterSpec(traffic_sources=effective_sources)
     campaign_options = _merge_options(
@@ -1447,9 +1478,10 @@ def _global_filters(
             for option_period in option_periods
         )
     )
-    campaigns = checkbox_group(
-        "Campaign", campaign_options, "global_campaign", all_label="All campaigns"
-    )
+    with campaign_column:
+        campaigns = checkbox_group(
+            "Campaign", campaign_options, "global_campaign", all_label="All campaigns"
+        )
     effective_campaigns = _effective_filter_values(campaign_options, campaigns)
     campaign_filters = FilterSpec(
         traffic_sources=effective_sources,
@@ -1463,9 +1495,10 @@ def _global_filters(
             for option_period in option_periods
         )
     )
-    devices = checkbox_group(
-        "Device", device_options, "global_device", all_label="All devices"
-    )
+    with device_column:
+        devices = checkbox_group(
+            "Device", device_options, "global_device", all_label="All devices"
+        )
     effective_devices = _effective_filter_values(device_options, devices)
     device_filters = FilterSpec(
         traffic_sources=effective_sources,
@@ -1480,12 +1513,13 @@ def _global_filters(
             for option_period in option_periods
         )
     )
-    session_types = checkbox_group(
-        "Session type",
-        session_type_options,
-        "global_session_type",
-        all_label="All session types",
-    )
+    with session_type_column:
+        session_types = checkbox_group(
+            "Session type",
+            session_type_options,
+            "global_session_type",
+            all_label="All session types",
+        )
     effective_session_types = _effective_filter_values(
         session_type_options, session_types
     )
@@ -1508,13 +1542,12 @@ def _global_filters(
         )
         if value is not None
     ) or ("Global filters: None",)
-    ui.button(
-        "Reset analysis filters",
-        key="reset_analysis_filters",
-        variant="outline",
-        on_click=_reset_analysis_filters,
-        width="stretch",
-    )
+    if partial:
+        st.caption(f"Incomplete source months excluded from reporting: {partial}.")
+    if compare_options == ("None",):
+        st.caption(
+            "Comparison is unavailable because it would precede the covered-month heuristic boundary."
+        )
     return (
         period,
         compare,
@@ -1530,23 +1563,31 @@ def _global_filters(
 
 def _render_overview_filters(compare: str) -> dict:
     _section("Overview controls")
-    grain = _ui_select("Time grain", ("Month", "Week", "Day", "Quarter"), key="overview_grain")
-    basis = _ui_select("Revenue basis", ("Gross", "Net"), key="overview_basis")
-    primary = _ui_select(
-        "Primary KPI",
-        ("Revenue", "Orders", "Sessions", "Order Rate", "Average Order Value", "Gross Margin", "Refund Event Ratio"),
-        key="overview_primary",
+    # Bottom-aligned because the last label wraps to two lines when there is no comparison.
+    grain_column, basis_column, primary_column, dimension_column = st.columns(
+        FILTER_GRID, vertical_alignment="bottom"
     )
+    with grain_column:
+        grain = _ui_select("Time grain", ("Month", "Week", "Day", "Quarter"), key="overview_grain")
+    with basis_column:
+        basis = _ui_select("Revenue basis", ("Gross", "Net"), key="overview_basis")
+    with primary_column:
+        primary = _ui_select(
+            "Primary KPI",
+            ("Revenue", "Orders", "Sessions", "Order Rate", "Average Order Value", "Gross Margin", "Refund Event Ratio"),
+            key="overview_primary",
+        )
     dimension_role = (
         "Current-period breakdown dimension"
         if compare == "None"
         else "Contribution dimension"
     )
-    dimension = _ui_select(
-        dimension_role,
-        ("Traffic source", "UTM source", "Campaign", "Device", "Session type"),
-        key="overview_dimension",
-    )
+    with dimension_column:
+        dimension = _ui_select(
+            dimension_role,
+            ("Traffic source", "UTM source", "Campaign", "Device", "Session type"),
+            key="overview_dimension",
+        )
     return {
         "grain": grain,
         "basis": basis,
@@ -1562,24 +1603,29 @@ def _render_overview_filters(compare: str) -> dict:
 
 def _render_acquisition_filters(options: dict) -> dict:
     _section("Acquisition controls")
-    ad_contents = checkbox_group(
-        "Ad content", options["ad"], "acq_ad", all_label="All ad content"
-    )
-    referrers = checkbox_group(
-        "Referrer type",
-        options["referrer"],
-        "acq_referrer",
-        all_label="All referrer types",
-    )
-    landings = checkbox_group(
-        "Landing page", options["landing"], "acq_landing", all_label="All landing pages"
-    )
-    metric = _ui_select(
-        "Metric",
-        ("Sessions", "Orders", "Order Rate", "Revenue per Session", "Gross Margin per Session"),
-        key="acq_metric",
-        default="Sessions",
-    )
+    ad_column, referrer_column, landing_column, metric_column = st.columns(FILTER_GRID)
+    with ad_column:
+        ad_contents = checkbox_group(
+            "Ad content", options["ad"], "acq_ad", all_label="All ad content"
+        )
+    with referrer_column:
+        referrers = checkbox_group(
+            "Referrer type",
+            options["referrer"],
+            "acq_referrer",
+            all_label="All referrer types",
+        )
+    with landing_column:
+        landings = checkbox_group(
+            "Landing page", options["landing"], "acq_landing", all_label="All landing pages"
+        )
+    with metric_column:
+        metric = _ui_select(
+            "Metric",
+            ("Sessions", "Orders", "Order Rate", "Revenue per Session", "Gross Margin per Session"),
+            key="acq_metric",
+            default="Sessions",
+        )
     scope = tuple(
         value
         for value in (
@@ -1609,30 +1655,35 @@ def _render_funnel_filters(options: dict) -> dict:
         "Funnel controls",
         "Product-detail and billing choices define those stages and downstream reach. They do not filter the Landing cohort and are not experiment treatments.",
     )
-    landings = checkbox_group(
-        "Landing page", options["landing"], "funnel_landing", all_label="All landing pages"
-    )
-    selected_products = checkbox_group(
-        "Product-detail page",
-        options["product_page"],
-        "funnel_product",
-        all_label="All product-detail pages",
-    )
+    landing_column, product_column, version_column, compare_by_column = st.columns(FILTER_GRID)
+    with landing_column:
+        landings = checkbox_group(
+            "Landing page", options["landing"], "funnel_landing", all_label="All landing pages"
+        )
+    with product_column:
+        selected_products = checkbox_group(
+            "Product-detail page",
+            options["product_page"],
+            "funnel_product",
+            all_label="All product-detail pages",
+        )
     products = _effective_filter_values(options["product_page"], selected_products)
     version_labels = {
         "All": "All observed billing paths",
         "/billing": "Observed /billing path",
         "/billing-2": "Observed /billing-2 path",
     }
-    version = _ui_select(
-        "Billing path",
-        ("All", "/billing", "/billing-2"),
-        key="funnel_version",
-        format_func=lambda value: version_labels[value],
-    )
-    compare_by = _ui_select(
-        "Compare by", ("Device", "Traffic source", "Campaign", "Landing page"), key="funnel_compare"
-    )
+    with version_column:
+        version = _ui_select(
+            "Billing path",
+            ("All", "/billing", "/billing-2"),
+            key="funnel_version",
+            format_func=lambda value: version_labels[value],
+        )
+    with compare_by_column:
+        compare_by = _ui_select(
+            "Compare by", ("Device", "Traffic source", "Campaign", "Landing page"), key="funnel_compare"
+        )
     landing_scope = selection_summary(
         "Landing page", options["landing"], landings, all_label="All landing pages"
     )
@@ -1658,46 +1709,54 @@ def _render_funnel_filters(options: dict) -> dict:
 
 def _render_product_filters(options: dict) -> dict:
     _section("Product controls")
-    basis = _ui_select(
-        "Refund basis",
-        ("Purchase date", "Refund date"),
-        key="product_basis",
-    )
-    products = checkbox_group(
-        "Product", options["product"], "product_names", all_label="All products"
-    )
-    roles = checkbox_group(
-        "Item role", options["item_role"], "product_role", all_label="All item roles"
-    )
+    basis_column, product_column, role_column, size_column, metric_column = st.columns(5)
+    with basis_column:
+        basis = _ui_select(
+            "Refund basis",
+            ("Purchase date", "Refund date"),
+            key="product_basis",
+        )
+    with product_column:
+        products = checkbox_group(
+            "Product", options["product"], "product_names", all_label="All products"
+        )
+    with role_column:
+        roles = checkbox_group(
+            "Item role", options["item_role"], "product_role", all_label="All item roles"
+        )
     size_options = options["order_size"]
-    if set(roles) == {"Add-on"}:
+    add_on_only = set(roles) == {"Add-on"}
+    if add_on_only:
         size_options = tuple(
             size for size in size_options if size == "Multi-item"
         )
-        st.caption("Add-on items only occur in multi-item orders.")
-    sizes = checkbox_group(
-        "Order size",
-        size_options,
-        "product_size",
-        all_label=(
-            "Multi-item orders"
-            if size_options == ("Multi-item",)
-            else "All order sizes"
-        ),
-    )
+    with size_column:
+        sizes = checkbox_group(
+            "Order size",
+            size_options,
+            "product_size",
+            all_label=(
+                "Multi-item orders"
+                if size_options == ("Multi-item",)
+                else "All order sizes"
+            ),
+        )
     refund_measure_label = _refund_measure_label(basis)
-    metric = _ui_select(
-        "Metric",
-        (
-            "Revenue",
-            "Units Sold",
-            "Gross Margin",
-            refund_measure_label,
-            "Refunded Amount",
-            "Add-On Unit Share",
-        ),
-        key="product_metric",
-    )
+    with metric_column:
+        metric = _ui_select(
+            "Metric",
+            (
+                "Revenue",
+                "Units Sold",
+                "Gross Margin",
+                refund_measure_label,
+                "Refunded Amount",
+                "Add-On Unit Share",
+            ),
+            key="product_metric",
+        )
+    if add_on_only:
+        st.caption("Add-on items only occur in multi-item orders.")
     return {
         "products": products,
         "roles": roles,
@@ -1741,8 +1800,7 @@ def render_overview(
     global_scope: tuple[str, ...],
 ) -> None:
     prior_period = comparison_period(period, compare)
-    _page_header(
-        "Executive Overview",
+    _context_chips(
         period,
         prior_period,
         compare,
@@ -2017,8 +2075,7 @@ def render_acquisition(
         referrer_types=controls["referrers"],
     )
     prior_period = comparison_period(period, compare)
-    _page_header(
-        "Acquisition",
+    _context_chips(
         period,
         prior_period,
         compare,
@@ -2162,8 +2219,7 @@ def render_funnel(
     global_scope: tuple[str, ...],
 ) -> None:
     prior_period = comparison_period(period, compare)
-    _page_header(
-        "Website Funnel",
+    _context_chips(
         period,
         prior_period,
         compare,
@@ -2357,8 +2413,7 @@ def render_products(
     global_scope: tuple[str, ...],
 ) -> None:
     prior_period = comparison_period(period, compare)
-    _page_header(
-        "Products & Refunds",
+    _context_chips(
         period,
         prior_period,
         compare,
@@ -2641,51 +2696,55 @@ def render_app(path: str | Path, metadata: DatabaseMetadata) -> None:
         return
 
     with st.container(key="app_workspace"):
-        filter_column, content_column = st.columns([0.22, 0.78], gap="medium")
-        with filter_column:
-            with st.spinner("Loading filters and controls…"):
-                period, compare, filters, global_scope = _global_filters(
-                    path_string, metadata
-                )
-                option_periods = _comparison_option_periods(period, compare)
-                if page == "Executive Overview":
-                    controls = _render_overview_filters(compare)
-                elif page == "Acquisition":
-                    options = _merge_option_dicts(
-                        *(
-                            cached_acquisition_filter_options(
-                                path_string, option_period, filters
-                            )
-                            for option_period in option_periods
+        dashboard = st.container(key="dashboard_main")
+        with dashboard:
+            _page_title(page)
+            with st.container(key="filter_bar"):
+                with st.spinner("Loading filters and controls…"):
+                    with st.container(border=True, key="filter_global"):
+                        period, compare, filters, global_scope = _global_filters(
+                            path_string, metadata
                         )
-                    )
-                    controls = _render_acquisition_filters(options)
-                elif page == "Website Funnel":
-                    options = _merge_option_dicts(
-                        *(
-                            cached_funnel_filter_options(
-                                path_string, option_period, filters
+                    option_periods = _comparison_option_periods(period, compare)
+                    with st.container(border=True, key="filter_page"):
+                        if page == "Executive Overview":
+                            controls = _render_overview_filters(compare)
+                        elif page == "Acquisition":
+                            options = _merge_option_dicts(
+                                *(
+                                    cached_acquisition_filter_options(
+                                        path_string, option_period, filters
+                                    )
+                                    for option_period in option_periods
+                                )
                             )
-                            for option_period in option_periods
-                        )
-                    )
-                    controls = _render_funnel_filters(options)
-                else:
-                    options = _merge_option_dicts(
-                        *(
-                            cached_product_filter_options(
-                                path_string, option_period, filters
+                            controls = _render_acquisition_filters(options)
+                        elif page == "Website Funnel":
+                            options = _merge_option_dicts(
+                                *(
+                                    cached_funnel_filter_options(
+                                        path_string, option_period, filters
+                                    )
+                                    for option_period in option_periods
+                                )
                             )
-                            for option_period in option_periods
-                        )
-                    )
-                    controls = _render_product_filters(options)
-            st.markdown(
-                "<div class='filter-bottom-spacer' aria-hidden='true'></div>",
-                unsafe_allow_html=True,
-            )
+                            controls = _render_funnel_filters(options)
+                        else:
+                            options = _merge_option_dicts(
+                                *(
+                                    cached_product_filter_options(
+                                        path_string, option_period, filters
+                                    )
+                                    for option_period in option_periods
+                                )
+                            )
+                            controls = _render_product_filters(options)
 
-        with content_column:
+        # The panel is created after the dashboard so it sits to its right, but it is filled before
+        # the slow page calculations so a filter change updates its context line immediately.
+        render_agent_panel(path_string, page, period, compare, filters, controls)
+
+        with dashboard:
             with st.spinner("Calculating from the local database…"):
                 if page == "Executive Overview":
                     render_overview(
@@ -2727,5 +2786,4 @@ def render_app(path: str | Path, metadata: DatabaseMetadata) -> None:
                         controls,
                         global_scope,
                     )
-    render_agent_dock(path_string, page, period, compare, filters, controls)
 

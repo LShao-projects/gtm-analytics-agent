@@ -106,22 +106,21 @@ def test_all_pages_preserve_output_contracts_with_unified_filter_components():
     assert 'max-width:100rem' in page_markup
     assert "justify-content:flex-start" in page_markup
     assert ':has(> .st-key-top_nav_shell)' in page_markup
-    assert ':has(.page-title)' in page_markup
     assert 'margin:-.56rem -1.25rem -2.5rem' in page_markup
-    assert 'background:#F3F3FA; border-right:0; padding:1.25rem 1rem 2rem 1.75rem' in page_markup
-    assert 'height:calc(100vh - var(--topbar-height)); min-height:0; overflow:hidden' in page_markup
-    assert 'height:100%; min-height:0; padding-right:.75rem; box-sizing:border-box' in page_markup
-    assert 'overflow-y:auto; overflow-x:hidden; scrollbar-width:thin; scrollbar-gutter:stable' in page_markup
-    assert 'overscroll-behavior:contain' in page_markup
-    assert 'padding:1.25rem 1.25rem 2.5rem 1rem' in page_markup
-    assert 'padding-left:.75rem; padding-right:.75rem' in page_markup
-    assert ':first-child .section-title' in page_markup
+    assert 'grid-template-columns:minmax(0, 1fr) var(--agent-width)' in page_markup
+    assert 'grid-template-columns:minmax(0, 1fr) var(--agent-rail-width)' in page_markup
+    assert 'position:sticky; top:var(--topbar-height); align-self:start' in page_markup
+    assert '@media (max-width: 1279px)' in page_markup
+    assert '.st-key-agent_collapse, .st-key-agent_expand' in page_markup
+    assert 'position:absolute; left:-10px; top:50%' in page_markup
+    assert '.st-key-filter_global, .st-key-filter_page' in page_markup
+    assert 'background:var(--white) !important' in page_markup
     assert 'color:#FFFFFF !important; background:var(--navy) !important' in page_markup
     assert ':has(.context-summary)' in page_markup
     assert ".hoverlayer .hovertext path" in page_markup
     assert "filter:drop-shadow" in page_markup
     assert '[data-testid="stPlotlyChart"]:hover svg.main-svg' not in page_markup
-    assert ".filter-bottom-spacer { height:3rem; min-height:3rem; }" in page_markup
+    assert "filter-bottom-spacer" not in page_markup
     assert (
         '.st-key-data_guide_workspace div[data-testid="stButtonGroup"] '
         '[role="radio"][aria-checked="true"]'
@@ -131,13 +130,69 @@ def test_all_pages_preserve_output_contracts_with_unified_filter_components():
 
 def test_filter_workspace_does_not_mix_native_widget_design_systems():
     app = AppTest.from_file(APP, default_timeout=30).run()
+    filter_bar = app.main.get_by_key("filter_bar")
 
-    assert len(app.get("bidi_component")) >= 10
+    assert len(filter_bar.get("bidi_component")) >= 10
     assert len(app.selectbox) == 0
     assert len(app.select_slider) == 0
     assert len(app.checkbox) == 0
-    assert len(app.get("popover")) == 0
+    assert len(filter_bar.get("popover")) == 0
     assert not app.exception
+
+
+def _position(nodes, target):
+    return next(index for index, node in enumerate(nodes) if node is target)
+
+
+def test_filters_sit_above_the_page_and_the_agent_is_the_right_hand_column():
+    app = AppTest.from_file(APP, default_timeout=30).run()
+
+    workspace = list(app.main.get_by_key("app_workspace"))
+    dashboard = app.main.get_by_key("dashboard_main")
+    filter_bar = app.main.get_by_key("filter_bar")
+    agent = app.main.get_by_key("agent_panel")
+    first_metric = next(node for node in workspace if getattr(node, "type", None) == "metric")
+
+    assert _position(workspace, dashboard) < _position(workspace, agent)
+    assert _position(workspace, dashboard) < _position(workspace, filter_bar)
+    assert _position(workspace, filter_bar) < _position(workspace, first_metric)
+    assert len(agent.chat_input) == 1
+    assert not app.exception
+
+
+def test_each_page_reads_title_then_filter_cards_then_context_then_scorecards():
+    app = AppTest.from_file(APP, default_timeout=30).run()
+
+    for page in PAGES[:-1]:
+        app.segmented_control(key="top_navigation").set_value(page).run()
+        assert not app.exception
+        workspace = list(app.main.get_by_key("app_workspace"))
+
+        def markdown_with(text):
+            return next(
+                node
+                for node in workspace
+                if getattr(node, "type", None) == "markdown" and text in node.value
+            )
+
+        reading_order = [
+            markdown_with("page-title"),
+            app.main.get_by_key("filter_global"),
+            app.main.get_by_key("filter_page"),
+            markdown_with("context-summary"),
+            next(node for node in workspace if getattr(node, "type", None) == "metric"),
+        ]
+        positions = [_position(workspace, node) for node in reading_order]
+        assert positions == sorted(positions) and len(set(positions)) == len(positions)
+
+
+def test_the_agent_panel_is_open_on_every_analysis_page_and_absent_from_the_data_guide():
+    app = AppTest.from_file(APP, default_timeout=30).run()
+
+    for page in PAGES:
+        app.segmented_control(key="top_navigation").set_value(page).run()
+        assert not app.exception
+        assert len(app.chat_input) == (0 if page == "Data Guide" else 1)
 
 
 def test_page_switch_keeps_navigation_stable():

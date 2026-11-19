@@ -30,12 +30,12 @@ def _replay_result(analytics_db):
     return investigate(QUESTION, tools, _replay_client(), context=context)
 
 
-def _dock_app(analytics_db, controls=None):
+def _panel_app(analytics_db, controls=None):
     def page(database_path, page_controls):
-        from dashboard.agent_panel import render_agent_dock
+        from dashboard.agent_panel import render_agent_panel
         from dashboard.models import DatePeriod, FilterSpec
 
-        render_agent_dock(
+        render_agent_panel(
             database_path,
             "Acquisition",
             DatePeriod.from_months("2014-06", "2014-06"),
@@ -95,27 +95,42 @@ def test_result_helpers_pair_claims_with_rendered_sentences(analytics_db):
     assert claim_rows(type(result)("refusal", "x", None, result.trace)) == []
 
 
-def test_dock_is_a_collapsed_button_until_opened_and_closes_again(analytics_db):
-    app = _dock_app(analytics_db).run()
+def test_panel_is_open_by_default_and_collapses_to_a_rail_and_back(analytics_db):
+    app = _panel_app(analytics_db).run()
 
     assert not app.exception
-    assert [button.label for button in app.button] == ["Ask the agent"]
-    assert not app.chat_input
-
-    app.button[0].click().run()
-    assert not app.exception
-    assert [button.label for button in app.button] == [":material/close:"]
+    assert [button.label for button in app.button] == [":material/chevron_right:"]
     assert len(app.chat_input) == 1
     assert [radio.label for radio in app.radio] == ["Model"]
+    assert not any(caption.value.startswith("Reading:") for caption in app.caption)
 
     app.button[0].click().run()
-    assert [button.label for button in app.button] == ["Ask the agent"]
-    assert not app.chat_input
+    assert not app.exception
+    assert [button.label for button in app.button] == [":material/chevron_left:"]
+    assert not app.chat_input and not app.radio
 
-
-def test_asking_in_the_open_dock_shows_a_report_for_the_current_page(analytics_db):
-    app = _dock_app(analytics_db).run()
     app.button[0].click().run()
+    assert [button.label for button in app.button] == [":material/chevron_right:"]
+    assert len(app.chat_input) == 1
+
+
+def test_collapsing_the_panel_keeps_the_thread_and_the_model_choice(analytics_db):
+    app = _panel_app(analytics_db).run()
+    next(radio for radio in app.radio if radio.label == "Model").set_value(DEMO_MODEL)
+    app.chat_input[0].set_value(QUESTION).run()
+    assert len(app.session_state["agent_thread"]) == 1
+
+    app.button[0].click().run()
+    app.button[0].click().run()
+
+    assert not app.exception
+    assert len(app.session_state["agent_thread"]) == 1
+    assert next(radio for radio in app.radio if radio.label == "Model").value == DEMO_MODEL
+    assert "**Gross revenue was \\$" in " ".join(markdown.value for markdown in app.markdown)
+
+
+def test_asking_in_the_panel_shows_a_report_for_the_current_page(analytics_db):
+    app = _panel_app(analytics_db).run()
     model = next(radio for radio in app.radio if radio.label == "Model")
     assert model.options == [LIVE_MODEL, DEMO_MODEL]
     model.set_value(DEMO_MODEL)
@@ -275,8 +290,7 @@ def test_the_agent_reads_the_revenue_basis_from_the_page_instead_of_asking(analy
     assert page_revenue_basis({"basis": "Gross"}) == ("Gross", "")
     assert page_revenue_basis({})[0] == "Gross"
 
-    app = _dock_app(analytics_db, {"basis": "Net", "grain": "Month"}).run()
-    app.button[0].click().run()
+    app = _panel_app(analytics_db, {"basis": "Net", "grain": "Month"}).run()
     next(radio for radio in app.radio if radio.label == "Model").set_value(DEMO_MODEL)
     app.chat_input[0].set_value(QUESTION).run()
 
@@ -355,9 +369,8 @@ def test_a_definition_is_a_title_then_labeled_parts_whatever_the_kind(analytics_
 
 
 def test_live_model_runs_are_capped_per_session(analytics_db):
-    app = _dock_app(analytics_db).run()
+    app = _panel_app(analytics_db).run()
     app.session_state["agent_live_runs"] = MAX_LIVE_RUNS_PER_SESSION
-    app.button[0].click().run()
     app.chat_input[0].set_value(QUESTION).run()
 
     assert not app.exception

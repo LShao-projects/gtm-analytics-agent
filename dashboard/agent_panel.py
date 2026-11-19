@@ -1,6 +1,7 @@
-"""Read-only investigation agent dock: a floating button that opens a right-side chat drawer.
+"""Read-only investigation agent panel: a chat column docked to the right of the dashboard.
 
-The dock reads the page's global filters and revenue basis and never changes any dashboard control.
+The panel is open by default and collapses to a narrow rail. It reads the page's global filters
+and revenue basis and never changes any dashboard control.
 """
 
 from __future__ import annotations
@@ -47,32 +48,55 @@ _PROVENANCE = {
     "definition": "Definitions are quoted by code from the Data Guide; the model only chose which ones.",
 }
 
-# The thread's scroll box is a column-reverse flex container, so a short thread sits at the
-# bottom above the input and a long one stays scrolled to the newest message.
-_DOCK_CSS = """
+# Styles the panel's interior, open and collapsed; its grid column and sticky height are set by the
+# workspace layout in dashboard/ui.py. The thread's scroll box is a column-reverse flex container,
+# so a short thread sits at the bottom above the input and a long one stays scrolled to the newest
+# message. The collapse and expand buttons are tabs on the panel's left edge, vertically centered;
+# their containing block is the sticky grid cell, so the panel's overflow:hidden does not clip them.
+PANEL_CSS = """
 <style>
-.stMain div[data-testid="stVerticalBlock"] > div:has(> .st-key-agent_launcher) {
-  position:fixed; right:1.5rem; bottom:1.5rem; z-index:1100; width:auto;
-}
-.st-key-agent_launcher button {
-  border-radius:999px; padding:.5rem 1.2rem; box-shadow:0 6px 18px rgba(24,39,75,.24);
-}
-.stMain div[data-testid="stVerticalBlock"] > div:has(> .st-key-agent_drawer) {
-  position:fixed; top:var(--topbar-height); right:0; bottom:0; z-index:1090;
-  width:min(440px,100vw);
-}
-.st-key-agent_drawer {
+.st-key-agent_panel {
   height:100%; box-sizing:border-box; padding:.7rem 1rem .9rem; overflow:hidden;
   background:var(--white); border-left:1px solid var(--line);
-  box-shadow:-8px 0 24px rgba(24,39,75,.12);
+  display:flex; flex-direction:column; gap:.45rem; flex-wrap:nowrap;
 }
-.st-key-agent_drawer { display:flex; flex-direction:column; gap:.45rem; flex-wrap:nowrap; }
-.st-key-agent_drawer > * { flex:0 0 auto; }
-.st-key-agent_drawer > div:has(> .st-key-agent_thread) {
+.st-key-agent_panel > * { flex:0 0 auto; }
+.st-key-agent_panel > div:first-child div[data-testid="stHorizontalBlock"] { flex-wrap:nowrap !important; }
+.st-key-agent_panel > div:first-child div[data-testid="stColumn"]:first-child {
+  flex:1 1 0 !important; width:auto !important;
+}
+.st-key-agent_panel > div:first-child div[data-testid="stColumn"]:not(:first-child) {
+  flex:0 0 auto !important; width:auto !important; min-width:0 !important;
+}
+.st-key-agent_panel > div:has(> .st-key-agent_thread) {
   flex:1 1 0; min-height:0; overflow-y:auto; display:flex; flex-direction:column-reverse;
 }
 .st-key-agent_thread { flex:0 0 auto; }
-.st-key-agent_drawer button[kind="tertiary"] { padding:.1rem .35rem; min-height:0; }
+.st-key-agent_panel_collapsed {
+  height:100%; box-sizing:border-box; padding:.7rem .3rem; overflow:hidden;
+  background:var(--white); border-left:1px solid var(--line);
+  display:flex; flex-direction:column; align-items:center; gap:.6rem;
+}
+.st-key-agent_panel_collapsed > * { flex:0 0 auto; }
+.st-key-agent_panel_collapsed [data-testid="stMarkdownContainer"] { margin-bottom:0; }
+.agent-rail-label {
+  writing-mode:vertical-rl; color:var(--muted); font-size:.78rem; font-weight:650;
+  letter-spacing:.04em; line-height:1.3; white-space:nowrap;
+}
+.st-key-agent_panel button[kind="tertiary"],
+.st-key-agent_panel_collapsed button[kind="tertiary"] { padding:.1rem .35rem; min-height:0; }
+.st-key-agent_collapse, .st-key-agent_expand {
+  position:absolute; left:-10px; top:50%; transform:translateY(-50%); z-index:6;
+}
+.st-key-agent_collapse button[kind="tertiary"], .st-key-agent_expand button[kind="tertiary"] {
+  width:20px; height:56px; min-height:56px; padding:0; border-radius:10px;
+  background:var(--white); border:1px solid #D3D8E6; color:var(--navy);
+  box-shadow:0 2px 8px rgba(24,39,75,.12);
+}
+.st-key-agent_collapse button[kind="tertiary"]:hover, .st-key-agent_expand button[kind="tertiary"]:hover {
+  background:#F2EFFF; border-color:#B9B1E8;
+}
+.st-key-agent_collapse span[role="img"], .st-key-agent_expand span[role="img"] { font-size:1.3rem; }
 </style>
 """
 
@@ -348,8 +372,8 @@ def _render_result(result: InvestigationResult, position: int) -> None:
     _render_details(result, position)
 
 
-def _toggle_drawer() -> None:
-    st.session_state["agent_open"] = not st.session_state.get("agent_open", False)
+def _toggle_collapsed() -> None:
+    st.session_state["agent_collapsed"] = not st.session_state.get("agent_collapsed", False)
 
 
 def _ask(
@@ -384,7 +408,7 @@ def _ask(
 
 
 @st.fragment
-def _dock(
+def _panel(
     path: str | Path,
     page: str,
     period: DatePeriod,
@@ -392,16 +416,23 @@ def _dock(
     filters: FilterSpec,
     controls: Mapping[str, object],
 ) -> None:
-    st.markdown(_DOCK_CSS, unsafe_allow_html=True)
-    if not st.session_state.get("agent_open", False):
-        with st.container(key="agent_launcher"):
+    if st.session_state.get("agent_collapsed", False):
+        with st.container(key="agent_panel_collapsed"):
             st.button(
-                "Ask the agent", key="agent_toggle", type="primary", on_click=_toggle_drawer
+                ":material/chevron_left:",
+                key="agent_expand",
+                help="Open the investigation agent",
+                type="tertiary",
+                on_click=_toggle_collapsed,
+            )
+            st.markdown(
+                "<div class='agent-rail-label'>Investigation agent</div>",
+                unsafe_allow_html=True,
             )
         return
 
-    with st.container(key="agent_drawer"):
-        title, settings, close = st.columns([0.74, 0.13, 0.13], vertical_alignment="center")
+    with st.container(key="agent_panel"):
+        title, settings = st.columns([0.87, 0.13], vertical_alignment="center")
         title.markdown("#### Investigation agent")
         models = (LIVE_MODEL, DEMO_MODEL)
         saved = st.session_state.get("agent_model_saved", LIVE_MODEL)
@@ -413,18 +444,17 @@ def _dock(
                 help="The replay runs a fixed set of tool calls and ignores the question wording.",
             )
         st.session_state["agent_model_saved"] = model_choice
-        close.button(
-            ":material/close:",
-            key="agent_close",
-            help="Close",
+        st.button(
+            ":material/chevron_right:",
+            key="agent_collapse",
+            help="Collapse",
             type="tertiary",
-            on_click=_toggle_drawer,
+            on_click=_toggle_collapsed,
         )
 
         revenue_basis, basis_note = page_revenue_basis(controls)
         context = build_context(page, period, mode, filters, revenue_basis)
         caption = context_caption(context, basis_note)
-        st.caption(f"Reading: {caption}")
 
         thread_area = st.container(key="agent_thread")
         question = st.chat_input("Ask about what you see on this page", key="agent_question")
@@ -444,7 +474,7 @@ def _dock(
                         _render_result(result, position)
 
 
-def render_agent_dock(
+def render_agent_panel(
     path: str | Path,
     page: str,
     period: DatePeriod,
@@ -452,5 +482,5 @@ def render_agent_dock(
     filters: FilterSpec,
     controls: Mapping[str, object],
 ) -> None:
-    """Render the floating agent button and its drawer on the current page."""
-    _dock(path, page, period, mode, filters, controls)
+    """Render the agent chat panel for the current page; it collapses to a narrow rail."""
+    _panel(path, page, period, mode, filters, controls)
